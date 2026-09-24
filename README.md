@@ -34,9 +34,11 @@ A small local web app with three tasks, chosen automatically from what you provi
 Three design choices do most of the work:
 
 - **Grounding is verified in code, not trusted.** The model must quote the document. Each
-  quote is matched against the document it names, tolerant of PDF artefacts (line breaks,
-  hyphenation, ligatures, curly quotes) but not of changed words or numbers. Matched quotes
-  are replaced with the exact source passage. Unmatched ones are removed and flagged.
+  quote is matched against the document it names. Matching ignores spacing, punctuation and
+  PDF artefacts (line breaks, hyphenation, ligatures, curly quotes) but not changed letters,
+  digits, or currency and percent signs. A matched quote is always replaced with the exact
+  source passage, so what you see is what the document says. Unmatched quotes are removed
+  and flagged.
 - **The user's side of the deal is explicit.** The optional "Your situation" field sets the
   perspective. When it is empty, the assessment is written for the individual or less
   powerful party and says so ("Assessed for: the Tenant").
@@ -71,7 +73,7 @@ Endpoints (the interactive API docs are disabled because the CSP blocks their CD
 
 - `POST /api/documents/text?kind=pdf|docx|txt|md` takes the raw file as the request body and returns `{"text": "..."}`.
 - `POST /api/assist` takes `{"documents": ["..."], "question": "...", "context": "..."}` and returns `{"task", "result", "warnings", "disclaimer"}`.
-- Errors always return `{"detail": "..."}`.
+- Errors return `{"detail": "..."}`. The two exceptions come from middleware as plain text: the 10 MB body-limit 413 and the host-check 400.
 
 ## Decision logic
 
@@ -122,7 +124,7 @@ Also included:
 - Semantic HTML with a real `<form>`, a `<label>` for every control, fieldsets and a heading hierarchy. Hints are part of the label text, so screen readers announce them.
 - Status updates go to a `role="status"` region and errors to a `role="alert"` region. Focus moves to the new results or answer heading.
 - Severity is written as text ("High") as well as shown in colour. Every colour pair meets WCAG AA contrast (at least 4.5:1) in light and dark mode (`color-scheme: light dark`).
-- Everything works from the keyboard, with a visible focus outline and no animations. The layout works at phone width.
+- Everything works from the keyboard, with a visible focus outline. The only motion is the browser's own progress bar while a request runs. The layout works at phone width.
 
 ## Tech stack
 
@@ -161,8 +163,10 @@ Open <http://localhost:8000>. For development, add `--reload`.
 
 The SDK's standard credential chain applies: `ANTHROPIC_API_KEY`, then
 `ANTHROPIC_AUTH_TOKEN`, then an `ant auth login` profile. If none is found, the app refuses
-to start and says what to do. Upload and document size limits are constants in
-`web.py` and `documents.py`.
+to start and says what to do. Size limits are constants: the upload limit in `web.py`, the
+document limit in `documents.py`, and the question and situation limits in `schemas.py`. The UI
+repeats the last two as `maxlength` in `static/index.html` and the upload limit in the 413
+message in `static/app.js`, so change them together.
 
 ## Usage
 
@@ -228,7 +232,7 @@ questions in a row. The second request's log line should show `cache_read_tokens
 ## Security
 
 - **Secrets.** The API key comes from the environment and is never logged. `.env` is gitignored, and startup fails clearly without credentials.
-- **Untrusted files.** DOCX decompression is capped against zip bombs, PDF extraction stops at the character limit, and request bodies over 10 MB are rejected before they are read. Any parser failure becomes a 400 with a fixed message.
+- **Untrusted files.** DOCX decompression is capped against zip bombs, PDF extraction stops at the character limit, and request bodies over 10 MB are rejected before they are read. Any parser failure becomes a 400 with a fixed message, or a 413 when a cap is exceeded.
 - **Untrusted model output.** The output is schema-validated, its stop reason is checked first, its quotes are verified, and it is rendered with `textContent` only, never as HTML.
 - **Prompt injection.** The system prompt treats document text as material, not instructions, and the output schema is fixed. This reduces the risk but cannot eliminate it, which is why extracted text is shown to the user and quotes are verified.
 - **Privacy in logs and errors.** Logs hold sizes, durations, token counts and request ids, never document text, questions or file names. Validation errors are rebuilt from field names so they never echo the submitted document.

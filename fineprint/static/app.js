@@ -23,8 +23,10 @@ function el(tag, text, className) {
   return node;
 }
 
+// One request at a time: uploading while an analysis runs would change the text under it.
 function setBusy(message) {
   $("submit").disabled = Boolean(message);
+  for (const input of document.querySelectorAll("input[type=file]")) input.disabled = Boolean(message);
   $("progress").hidden = !message;
   if (message) {
     statusLine.textContent = message;
@@ -38,7 +40,9 @@ function showError(message) {
 }
 
 async function request(url, options) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, options).catch(() => {
+    throw new Error("Couldn't reach FinePrint. Check that the app is still running, then try again.");
+  });
   const body = await response.text();
   let data = null;
   try {
@@ -87,7 +91,9 @@ for (const input of document.querySelectorAll("input[type=file]")) {
 $("assist-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const question = $("question").value.trim();
-  const documents = [$("document-a").value, $("document-b").value].filter((text) => text.trim());
+  // Document A is always sent (the server rejects it if blank) so quote labels match the textareas.
+  const second = $("document-b").value;
+  const documents = second.trim() ? [$("document-a").value, second] : [$("document-a").value];
   twoDocuments = documents.length === 2;
   setBusy("Reading your document. Long documents can take a few minutes.");
   try {

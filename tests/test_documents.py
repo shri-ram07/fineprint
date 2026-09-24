@@ -2,7 +2,7 @@ import io
 import zipfile
 
 import pytest
-from pypdf import PdfReader, PdfWriter
+from pypdf import PageObject, PdfReader, PdfWriter
 
 from fineprint import documents
 from fineprint.documents import DocumentError, extract_text
@@ -92,6 +92,17 @@ def test_docx_paragraphs_tabs_and_breaks():
     assert extract_text("docx", make_docx(xml)) == "1. Term\t12 months\nLine one\nLine two"
 
 
+def test_docx_text_box_appears_once_and_hyphens_survive():
+    mc = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
+    box = "<w:txbxContent><w:p><w:r><w:t>Deposit: 2,000</w:t></w:r></w:p></w:txbxContent>"
+    xml = (
+        f"<w:document {W} {mc}><w:body><w:p><w:r><w:t>A 30</w:t><w:noBreakHyphen/>"
+        f"<w:t>day notice.</w:t></w:r><w:r><mc:AlternateContent><mc:Choice>{box}</mc:Choice>"
+        f"<mc:Fallback>{box}</mc:Fallback></mc:AlternateContent></w:r></w:p></w:body></w:document>"
+    )
+    assert extract_text("docx", make_docx(xml)) == "A 30-day notice.\nDeposit: 2,000"
+
+
 def test_docx_decompressed_size_is_bounded(monkeypatch):
     monkeypatch.setattr(documents, "MAX_XML_BYTES", 1_000)
     bomb = make_docx(f"<w:document {W}>" + " " * 5_000 + "</w:document>")
@@ -148,6 +159,19 @@ def test_garbage_pdf_is_corrupt():
 )
 def test_text_longer_than_limit_is_too_large(kind, data):
     assert error_code(kind, data, max_chars=10) == "too_large"
+
+
+def test_pdf_extraction_stops_once_the_limit_is_passed(monkeypatch):
+    extracted = []
+    original = PageObject.extract_text
+
+    def spy(page, *args, **kwargs):
+        extracted.append(original(page, *args, **kwargs))
+        return extracted[-1]
+
+    monkeypatch.setattr(PageObject, "extract_text", spy)
+    assert error_code("pdf", make_pdf("A" * 20, "B" * 20), max_chars=10) == "too_large"
+    assert len(extracted) == 1  # the second page was never read
 
 
 @pytest.mark.parametrize("data", [b"", b"\n\n  \n"])

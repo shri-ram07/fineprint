@@ -77,6 +77,7 @@ def test_invalid_output_is_malformed_and_not_logged(caplog):
         (429, "unavailable"),
         (529, "unavailable"),
         (400, "malformed"),
+        (200, "unavailable"),  # error event mid-stream, e.g. overloaded_error
     ],
 )
 def test_api_errors_map_to_user_facing_codes(status, code):
@@ -101,8 +102,18 @@ def test_connection_failure_is_unavailable():
     assert raised.value.code == "unavailable"
 
 
+@pytest.mark.parametrize(
+    "credentials",
+    [{"api_key": "k"}, {"auth_token": "t"}, {"credentials": object()}],
+    ids=["api-key", "auth-token", "ant-login-profile"],
+)
+def test_any_credential_source_is_accepted(credentials):
+    client = MagicMock(**{"api_key": None, "auth_token": None, "credentials": None, **credentials})
+    AnthropicLLM("test-model", client)
+
+
 def test_missing_credentials_fail_at_construction():
-    client = MagicMock(api_key="", auth_token=None, credentials=None)
+    client = MagicMock(api_key=None, auth_token=None, credentials=None)
     with pytest.raises(LLMError) as raised:
         AnthropicLLM("test-model", client)
     assert raised.value.code == "configuration"

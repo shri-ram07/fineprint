@@ -109,12 +109,9 @@ def _warnings(result: BaseModel, unmatched: int) -> list[str]:
     if (
         isinstance(result, Answer)
         and result.supported_by_document != "no"
-        and not any(quote.text for quote in result.quotes)
+        and not result.quotes  # unmatched quotes are already covered by the warning above
     ):
-        warnings.append(
-            "The answer cites no passage that could be found in your document; "
-            "treat it with caution."
-        )
+        warnings.append("The answer cites no passage from your document; treat it with caution.")
     return warnings
 
 

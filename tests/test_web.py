@@ -17,7 +17,8 @@ def test_index_is_served_with_security_headers(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "FinePrint" in response.text
-    assert response.headers["Content-Security-Policy"] == "default-src 'self'"
+    csp = response.headers["Content-Security-Policy"]
+    assert csp == "default-src 'self'; frame-ancestors 'none'"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert client.get("/static/app.js").status_code == 200
 

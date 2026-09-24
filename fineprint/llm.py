@@ -56,7 +56,9 @@ class LLMClient(Protocol):
 def _code_for_status(status: int) -> LLMErrorCode:
     if status in (401, 402, 403, 404):  # bad key, billing, permissions, unknown model
         return "configuration"
-    if status == 429 or status >= 500:  # rate limited, overloaded or down: worth retrying
+    # Rate limited, overloaded or down: worth retrying. Below 400 means an error event arrived
+    # mid-stream after the HTTP 200 (typically overloaded_error), which is just as transient.
+    if status == 429 or status >= 500 or status < 400:
         return "unavailable"
     return "malformed"  # the request itself was rejected: a bug on our side
 
@@ -66,7 +68,7 @@ class AnthropicLLM:
         self.model = model
         self.client = client or anthropic.Anthropic()
         # The SDK only notices missing credentials when the first request is sent; fail at
-        # startup instead. A blank ANTHROPIC_API_KEY= line arrives as "", hence the falsy check.
+        # startup instead.
         if not (self.client.api_key or self.client.auth_token or self.client.credentials):
             raise LLMError("configuration", NO_CREDENTIALS)
 

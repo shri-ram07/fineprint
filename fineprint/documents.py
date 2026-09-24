@@ -28,6 +28,7 @@ MAX_DOCUMENT_CHARS = 300_000
 MAX_XML_BYTES = 32 * 1024 * 1024
 
 _WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
 
 
 class DocumentError(Exception):
@@ -128,15 +129,27 @@ def _docx_text(data: bytes) -> str:
     if len(xml) > MAX_XML_BYTES:
         raise DocumentError("too_large", "This Word document is too large to process.")
 
-    paragraphs = []
-    for paragraph in ElementTree.fromstring(xml).iter(f"{_WORD_NS}p"):
-        parts = []
-        for node in paragraph.iter():
-            if node.tag == f"{_WORD_NS}t":
-                parts.append(node.text or "")
-            elif node.tag == f"{_WORD_NS}tab":
-                parts.append("\t")
-            elif node.tag in (f"{_WORD_NS}br", f"{_WORD_NS}cr"):
-                parts.append("\n")
-        paragraphs.append("".join(parts))
-    return "\n".join(paragraphs)
+    parts: list[str] = []
+    _collect_docx_text(ElementTree.fromstring(xml), parts)
+    return "".join(parts)
+
+
+def _collect_docx_text(node: ElementTree.Element, parts: list[str]) -> None:
+    """Walk the document once, in order. Paragraphs nested in text boxes are visited once,
+    and Word's legacy copy of each text box (mc:Fallback) is skipped so nothing repeats."""
+    for child in node:
+        if child.tag == _FALLBACK:
+            continue
+        if child.tag == f"{_WORD_NS}t":
+            parts.append(child.text or "")
+        elif child.tag == f"{_WORD_NS}tab":
+            parts.append("\t")
+        elif child.tag == f"{_WORD_NS}noBreakHyphen":
+            parts.append("-")
+        elif child.tag in (f"{_WORD_NS}br", f"{_WORD_NS}cr"):
+            parts.append("\n")
+        elif child.tag == f"{_WORD_NS}p" and parts and not parts[-1].endswith("\n"):
+            parts.append("\n")  # a text box starts mid-paragraph: give it its own line
+        _collect_docx_text(child, parts)
+        if child.tag == f"{_WORD_NS}p":
+            parts.append("\n")

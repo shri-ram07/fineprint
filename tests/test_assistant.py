@@ -109,7 +109,13 @@ def test_quote_labelled_with_a_missing_document_is_unmatched():
     assert verify_quotes(answer, {"A": "Rent is £900."}) == 1
 
 
-def test_findings_without_any_quote_count_as_unmatched():
+def test_risks_without_any_quote_count_as_unmatched(analysis, lease):
+    assert verify_quotes(analysis, {"A": lease}) == 0
+    analysis.risks[0].quotes = []
+    assert verify_quotes(analysis, {"A": lease}) == 1
+
+
+def test_differences_without_any_quote_count_as_unmatched():
     comparison = Comparison(
         perspective="the Freelancer",
         summary="",
@@ -145,9 +151,20 @@ def test_analyze_sends_the_document_and_situation_and_sorts_risks(llm, lease):
     assert "not legal advice" in response.disclaimer
 
 
-def test_compare_labels_both_documents_and_caches_after_the_last(llm, lease):
+def test_compare_labels_both_documents_caches_after_the_last_and_sorts(llm, lease):
+    differences = [
+        Difference(
+            topic=severity,
+            document_a="",
+            document_b="",
+            impact="",
+            severity=severity,
+            quotes=[quote("The deposit is non-refundable.")],
+        )
+        for severity in ("low", "high")
+    ]
     llm.result = Comparison(
-        perspective="the Tenant", summary="", differences=[], questions_for_lawyer=[]
+        perspective="the Tenant", summary="", differences=differences, questions_for_lawyer=[]
     )
     response = assist(AssistRequest(documents=[lease, "Rent is £950."]), llm)
 
@@ -156,6 +173,7 @@ def test_compare_labels_both_documents_and_caches_after_the_last(llm, lease):
     assert "cache_control" not in first
     assert second["cache_control"] == {"type": "ephemeral"}
     assert response.task == "compare"
+    assert [difference.severity for difference in response.result.differences] == ["high", "low"]
 
 
 def test_ask_sends_the_question(llm, lease):
@@ -191,10 +209,17 @@ def test_non_legal_document_is_flagged(llm, analysis, lease):
     assert any("doesn't look like a legal document" in warning for warning in response.warnings)
 
 
-def test_supported_answer_without_a_matching_quote_is_flagged(llm, lease):
+@pytest.mark.parametrize(("support", "flagged"), [("yes", True), ("partly", True), ("no", False)])
+def test_answer_claiming_support_without_quotes_is_flagged(llm, lease, support, flagged):
+    llm.result = Answer(answer="...", supported_by_document=support, quotes=[], caveats=[])
+    response = assist(AssistRequest(documents=[lease], question="Can I keep a pet?"), llm)
+    assert any("cites no passage" in warning for warning in response.warnings) == flagged
+
+
+def test_unmatched_answer_quote_is_reported_once(llm, lease):
     llm.result = answer_with(quote("You may keep a pet."))
     response = assist(AssistRequest(documents=[lease], question="Can I keep a pet?"), llm)
-    assert any("cites no passage" in warning for warning in response.warnings)
+    assert len(response.warnings) == 1
 
 
 def test_llm_errors_propagate(llm, lease):

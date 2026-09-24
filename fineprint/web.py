@@ -28,7 +28,7 @@ MAX_BODY_BYTES = 10 * 1024 * 1024
 # malicious page from reaching it through DNS rebinding.
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 SECURITY_HEADERS = {
-    "Content-Security-Policy": "default-src 'self'",
+    "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
 }
@@ -40,7 +40,7 @@ def create_app(llm: LLMClient | None = None) -> FastAPI:
     llm = llm or AnthropicLLM.from_env()
 
     # The interactive API docs load scripts from a CDN, which the CSP forbids; the README
-    # documents the three endpoints instead.
+    # documents the API endpoints instead.
     app = FastAPI(title="FinePrint", docs_url=None, redoc_url=None, openapi_url=None)
 
     # Middleware added later wraps middleware added earlier. The body limit rejects oversized
