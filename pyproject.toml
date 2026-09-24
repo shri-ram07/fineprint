@@ -9,7 +9,7 @@ dependencies = [
     "fastapi>=0.115",
     "starlette>=1.6",
     "uvicorn>=0.30",
-    "pypdf[crypto]>=5",
+    "pypdf[crypto]>=6.19.0",
     "defusedxml>=0.7",
 ]
 
