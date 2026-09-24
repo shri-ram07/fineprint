@@ -32,7 +32,7 @@ A small local web app with three tasks, chosen automatically from what you provi
 |---|---|---|
 | One document | **Analyze** | Who it is written for, summary, risky or unusual clauses ranked by severity (with why each matters), clauses that contradict each other, key terms, obligations per party with their deadlines, what is missing or unclear, questions for a lawyer, next steps including your options |
 | A question (one or two documents) | **Ask** | A direct answer, whether the document supports it (yes, partly, no), supporting quotes, caveats and the one most useful next step |
-| Two documents | **Compare** | Differences by topic: what each says, what it means for you, severity, quotes from both, and next steps (which version to prefer, what to negotiate) |
+| Two documents | **Compare** | Differences by topic: what each says, what it means for you, which version is better for you, severity, quotes from both, and next steps (which version to prefer, what to negotiate) |
 
 Three design choices do most of the work:
 
@@ -107,7 +107,7 @@ How each use case listed in the challenge maps to the app:
 | Challenge use case | Where it lives |
 |---|---|
 | Simplify complex legal documents | Analyze: `summary`, `plain_language` for every risk |
-| Compare contracts, agreements, policies | Compare: `differences` with what each document says and the impact |
+| Compare contracts, agreements, policies | Compare: `differences` with what each document says, the impact and `better_for_you` |
 | Highlight clauses, obligations, risks, inconsistencies | Analyze: `risks`, `inconsistencies`, `obligations` (each with its deadline in `when`), `key_terms` |
 | Answer questions from the documents | Ask: `answer`, `supported_by_document`, verified `quotes`, `caveats` |
 | Understand options and next steps | `next_steps` in Analyze and Compare (including your choices); `next_step` on every answer |
@@ -205,14 +205,23 @@ Choices behind these flags:
 2. Optionally write your situation, for example "I'm the freelancer, signing next week".
 3. Leave the question blank and press **Get help with this document**.
 
-In a real run with `gemini-3.5-flash-lite` (about 8 seconds), the analysis flagged seven
-high risks: unpaid scope changes, payment withholding, assignment of your pre-existing work,
-the worldwide non-compete, unlimited liability, one-sided termination and unilateral changes
-to the terms. It rated the portfolio restriction and the arbitration and class-action waiver
-as medium. It gave each obligation its deadline ("Within 14 days of completing a
-milestone") and reported that Schedule A (the fees) and the project brief are referenced
-but missing. All 18 quotes matched the document. The full response is in
-[`samples/example-analysis.json`](samples/example-analysis.json).
+In a real run with `gemini-3.5-flash-lite` (about 8 seconds), the analysis flagged five high
+risks: unlimited liability and indemnity, the worldwide non-compete, assignment of your
+pre-existing work, one-sided termination, and unilateral changes to the terms. It caught the
+contradiction the sample hides between clause 3.1 (payment within 90 days) and clause 3.4
+(within 30 days). It also reported three missing items: Schedule A (the fees), the undefined
+notice period for stopping renewal, and the undefined acceptance criteria. Because the
+situation said "signing on Friday", the first next step was not to sign on Friday until
+these were fixed. All 19 quotes matched the document.
+
+Real responses for all three tasks are committed:
+
+- [`samples/example-analysis.json`](samples/example-analysis.json)
+- [`samples/example-answer.json`](samples/example-answer.json), which asks "When will I get paid for an invoice?"
+- [`samples/example-comparison.json`](samples/example-comparison.json), which compares v1 with v2
+
+The answer spots the 30-versus-90-day conflict and says what to ask a lawyer. The comparison
+marks the revised draft as better for you on all 11 topics.
 
 4. Ask a follow-up, such as "Can I leave early?". The answer is added below the analysis.
 5. Open **Compare with a second document**, add `samples/agreement-v2.txt` and submit with no question. You get a topic-by-topic comparison of the two drafts, with quotes from each (about 8 seconds).
@@ -224,10 +233,11 @@ uv sync --extra dev
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
-node --test tests/js/helpers.test.mjs
+uv run mypy
+node --test "tests/js/*.test.mjs"
 ```
 
-The Python suite runs offline in about 25 seconds, with 99% branch coverage (CI fails below
+The Python suite runs offline in about 30 seconds, is type-checked with mypy, and has 99% branch coverage (CI fails below
 98%). The frontend's pure helpers (`static/helpers.js`) are tested with Node's built-in test
 runner, which needs no dependencies. The model is replaced by a fake at the
 `LLMClient` protocol, and the SDK client by a mock inside the adapter tests. Test PDFs and
@@ -235,10 +245,11 @@ DOCX files are built inside the tests, so there are no binary fixtures.
 
 | File | What it covers |
 |---|---|
-| `test_documents.py` | Encodings (UTF-8, BOM, UTF-16, cp1252), DOCX paragraphs, zip-bomb and XML-entity attacks, PDF text, scanned and partly scanned PDFs, encrypted PDFs, corrupt files, size limits |
+| `test_documents.py` | Encodings (UTF-8, BOM, UTF-16, cp1252), DOCX paragraphs, zip-bomb, element-count and XML-entity attacks, PDF text, scanned and partly scanned PDFs, encrypted PDFs, corrupt files, size limits |
 | `test_assistant.py` | Task selection, request validation, quote verification (PDF artefacts, altered amounts, empty and wrongly labelled quotes, evidence-free findings), what is sent to the model, severity order, warnings, reasoning effort per task, the result cache (hits, copies, eviction, failures not cached, one model call for simultaneous identical requests) |
 | `test_llm.py` | Runs the real ADK agent with only the network call stubbed: request shape, finish reason checked before parsing, blocked prompts, malformed output not logged, API errors to error codes, missing key, agent reuse and session cleanup, low-effort thinking, tag break-out in any casing, timeout and retries, a missing final response, the model setting |
-| `tests/js/helpers.test.mjs` | File-type detection, error messages for JSON and plain-text failures, locating a quote in the document, severity labels |
+| `tests/js/helpers.test.mjs` | File-type detection, error messages for JSON and plain-text failures, locating a quote in the document, severity and preference labels |
+| `tests/js/rendering.test.mjs` | Guards the XSS defence: no HTML-parsing sink (`innerHTML`, `insertAdjacentHTML`, `document.write`, `eval`) anywhere in the frontend |
 | `test_web.py` | Routes, upload handling, 413, host check, security headers, cross-site POSTs refused, rate limits (forged `X-Forwarded-For`, the total cap, IPv6 grouping, eviction, no proxy header), gzip and cache headers, cached repeat answers, validation errors that never echo the document, model failures as fixed messages |
 
 A manual check needs a real key: run all three tasks on `samples/`. Each model call logs
@@ -262,14 +273,14 @@ one line with its finish reason, token counts (including cached tokens) and dura
 
 ## Efficiency
 
-- **The model is called as little as possible.** An identical request is answered from a bounded LRU cache (`RESULT_CACHE_SIZE`) with no model call. Identical requests that arrive together share a single call. Failures are never cached.
+- **The model is called as little as possible.** An identical request is answered from a bounded LRU cache (`RESULT_CACHE_SIZE`) with no model call, and such answers don't count against the hourly model-call cap. Identical requests that arrive together share a single call. Failures are never cached.
 - **Reasoning is sized to the task.** Questions run with Gemini's low thinking level, since they are lookups: about 2 seconds with Flash-Lite. Analyses and comparisons use the default level.
 - **No per-request setup.** One ADK agent and runner per task type is built on first use and reused. Each request only opens a session, which is deleted when the request finishes, so memory stays flat.
 - **Model calls are bounded.** There is a 120-second timeout and up to 3 automatic retries with backoff for transient failures, so a slow upstream cannot pin a worker.
 - **Linear-time quote checking, off the event loop.** A document's fingerprint is built once and reused across follow-up questions (a small LRU cache), and its character positions are stored in a compact 4-byte array. The per-character Unicode folding is memoised because a document uses few distinct characters: about 35% faster than unmemoised (0.034 s against 0.052 s on a 300,000-character document). Matching runs in a worker thread.
 - **Compact transfer.** Responses over 1 KB are gzip-compressed. Static files are cached for an hour, and the page itself is revalidated so new deployments are picked up.
 - **Nothing blocks the server.** File parsing and quote matching run in worker threads, at most two parses at a time to bound memory, and the model call is fully async. A running analysis never delays other requests.
-- **Bounded resources.** Bodies are capped at 10 MB before they are read, documents at 300,000 characters, DOCX XML at 32 MB, and output at 32k tokens. The service runs on a single small Cloud Run instance.
+- **Bounded resources.** Bodies are capped at 10 MB before they are read and documents at 300,000 characters. DOCX XML is streamed rather than built into a tree, capped at 16 MB and 500,000 elements (a crafted file stays under about 35 MB of memory and is rejected in under a second). Output is capped at 32k tokens. The Docker image keeps no package-download cache, and the service runs on a single small Cloud Run instance.
 
 ## Limitations
 
@@ -283,9 +294,13 @@ one line with its finish reason, token counts (including cached tokens) and dura
 ## Security
 
 - **Secrets.** The API key comes from the environment and is never logged. `.env` is gitignored, and startup fails clearly without credentials.
-- **Untrusted files.** Request bodies over 10 MB are rejected before they are read. DOCX decompression is capped against zip bombs, and its XML is parsed with `defusedxml` against entity attacks. PDF extraction stops at the character limit, and at most two files are parsed at once so crafted PDFs can't exhaust memory. Any parser failure becomes a 400 with a fixed message, or a 413 when a cap is exceeded.
+- **Untrusted files.** Request bodies over 10 MB are rejected before they are read.
+  - DOCX: decompression is capped against zip bombs. The XML is streamed through `defusedxml`'s SAX parser, which blocks entity attacks, with an element budget. No tree is built, so memory stays flat however many elements a crafted file packs in.
+  - PDF: extraction stops at the character limit.
+  - At most two uploads are read and parsed at once, so crafted files can't exhaust the instance's memory.
+  - Any parser failure becomes a 400 with a fixed message, or a 413 when a cap is exceeded.
 - **Untrusted model output.** The output is schema-validated, its stop reason is checked first, its quotes are verified, and it is rendered with `textContent` only, never as HTML.
-- **Prompt injection.** Each document is wrapped in its own tag, and a closing tag inside the document (in any casing) is neutralised. The system prompt treats document text as material, not instructions, and the output schema is fixed. This reduces the risk but cannot eliminate it, which is why extracted text is shown to the user and quotes are verified.
+- **Prompt injection.** Each document is wrapped in its own tag. Any document tag inside the text, opening or closing and in any casing, is neutralised, so one document can't end itself or pose as another. The system prompt treats document text as material, not instructions, and the output schema is fixed. This reduces the risk but cannot eliminate it, which is why extracted text is shown to the user and quotes are verified.
 - **Privacy in logs and errors.** Logs hold sizes, durations and token counts, never document text, questions or file names. Validation errors are rebuilt from field names so they never echo the submitted document.
 - **Hosts, origins and headers.** The app answers only to the hostnames in `ALLOWED_HOSTS`, a DNS-rebinding guard for a locally running copy that spends your API key. It refuses cross-site POSTs (by `Origin`). It sends:
   - a strict CSP (`default-src 'self'`, `base-uri 'none'`, `object-src 'none'`, `form-action 'self'`, `frame-ancestors 'none'`)
@@ -294,7 +309,7 @@ one line with its finish reason, token counts (including cached tokens) and dura
   - `no-referrer`
   - a restrictive Permissions-Policy
   - cross-origin opener and resource policies
-- **Spend limits that can't be dodged.** Both API endpoints are rate limited per client, and model calls also have a total hourly cap. Client addresses come from the proxy-appended end of `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`), not the client-controlled start, so forging the header does not reset a limit. Model calls have a 120-second timeout.
+- **Spend limits that can't be dodged.** Both API endpoints are rate limited per client, and model calls also have a total hourly cap. Client addresses come from the proxy-appended end of `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`), not the client-controlled start, so forging the header does not reset a limit. Model calls have a 120-second timeout, and timeouts or connection failures after the SDK's retries become a clear "try again" message.
 - **Supply chain.** Dependencies are locked (`uv.lock`). The base image is pinned by digest and the CI actions by commit SHA. CI runs the tests, ruff's security rules (flake8-bandit) and `pip-audit` on every push and on a weekly schedule, so newly disclosed vulnerabilities surface even without new commits. DOCX XML is parsed with `defusedxml`.
 - **Deployment.** The service runs as a dedicated least-privilege service account, reads its key from Secret Manager, serves only HTTPS, and runs as a non-root user on a single instance.
 
