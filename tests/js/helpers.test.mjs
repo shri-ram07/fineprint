@@ -1,4 +1,4 @@
-// Run with: node --test tests/js
+// Run with: node --test "tests/js/*.test.mjs"
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -6,6 +6,7 @@ import {
   errorMessage,
   fileKind,
   passageRange,
+  preferenceLabel,
   severityLabel,
 } from "../../fineprint/static/helpers.js";
 
@@ -43,6 +44,13 @@ test("passageRange returns null for missing or blank passages", () => {
 });
 
 test("severityLabel spells severity out", () => {
-  assert.equal(severityLabel("high"), "High");
-  assert.equal(severityLabel(""), "");
+  assert.equal(severityLabel("high", "risk"), "High risk");
+  assert.equal(severityLabel("low", "impact"), "Low impact");
+  assert.equal(severityLabel("", "risk"), "");
+});
+
+test("preferenceLabel names the better version in words", () => {
+  assert.equal(preferenceLabel("A"), "Better for you: Document A");
+  assert.equal(preferenceLabel("B"), "Better for you: Document B");
+  assert.match(preferenceLabel("neither"), /Neither/);
 });

@@ -16,11 +16,13 @@
   </header>
 
   <main>
-    <form id="assist-form" class="no-print">
+    <h2 id="form-heading" class="no-print">Check a document</h2>
+    <form id="assist-form" class="no-print" aria-labelledby="form-heading">
       <fieldset>
         <legend>Your document</legend>
         <label for="file-a">Upload a PDF, DOCX, TXT or MD file, or paste the text below</label>
-        <input type="file" id="file-a" data-target="document-a" accept=".pdf,.docx,.txt,.md">
+        <input type="file" id="file-a" data-target="document-a" accept=".pdf,.docx,.txt,.md"
+               aria-describedby="error">
         <label for="document-a">Document text</label>
         <textarea id="document-a" rows="12" required></textarea>
       </fieldset>
@@ -29,19 +31,22 @@
         <summary>Compare with a second document (optional)</summary>
         <fieldset>
           <legend>Second document</legend>
-          <label for="file-b">Upload the second document (PDF, DOCX, TXT or MD), or paste its text below</label>
-          <input type="file" id="file-b" data-target="document-b" accept=".pdf,.docx,.txt,.md">
+          <label for="file-b">Upload the second document (PDF, DOCX, TXT or MD), or paste its
+            text below</label>
+          <input type="file" id="file-b" data-target="document-b" accept=".pdf,.docx,.txt,.md"
+                 aria-describedby="error">
           <label for="document-b">Second document text</label>
           <textarea id="document-b" rows="8"></textarea>
         </fieldset>
       </details>
 
-      <label for="context">Your situation (optional). For example: I'm the tenant. I may need to
-        leave after 6 months. Signing on Friday.</label>
+      <label for="context">Your situation (optional, up to 500 characters). For example: I'm the
+        tenant. I may need to leave after 6 months. Signing on Friday.</label>
       <!-- maxlength values mirror AssistRequest in fineprint/schemas.py -->
       <textarea id="context" rows="2" maxlength="500"></textarea>
 
-      <label for="question">Question (optional). Leave blank for a full breakdown first.</label>
+      <label for="question">Question (optional, up to 1,000 characters). Leave blank for a full
+        breakdown first.</label>
       <input type="text" id="question" maxlength="1000">
 
       <button type="submit" id="submit">Get help with this document</button>

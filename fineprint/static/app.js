@@ -1,9 +1,10 @@
 // All model output is inserted with textContent, never as HTML.
-import { errorMessage, fileKind, passageRange, severityLabel } from "./helpers.js";
+import { errorMessage, fileKind, passageRange, preferenceLabel, severityLabel } from "./helpers.js";
 
 const $ = (id) => document.getElementById(id);
 const statusLine = $("status");
 const errorLine = $("error");
+const fileInputs = document.querySelectorAll("input[type=file]");
 
 const HEADINGS = { analyze: "What this document says", compare: "How the two documents differ" };
 const SUPPORT = {
@@ -26,14 +27,23 @@ let focusBeforeBusy = null;
 function setBusy(message) {
   if (message) focusBeforeBusy = document.activeElement;
   $("submit").disabled = Boolean(message);
-  for (const input of document.querySelectorAll("input[type=file]")) input.disabled = Boolean(message);
+  for (const input of fileInputs) input.disabled = Boolean(message);
   $("progress").hidden = !message;
   if (message) {
-    statusLine.textContent = message;
+    announce(message);
     errorLine.textContent = "";
   } else if (focusBeforeBusy && document.activeElement === document.body) {
     focusBeforeBusy.focus();
   }
+}
+
+// Clearing the live region first makes screen readers announce a message even when it
+// repeats (a second "Copied.", say).
+function announce(message) {
+  statusLine.textContent = "";
+  requestAnimationFrame(() => {
+    statusLine.textContent = message;
+  });
 }
 
 function showError(message) {
@@ -43,7 +53,9 @@ function showError(message) {
 
 async function request(url, options) {
   const response = await fetch(url, options).catch(() => {
-    throw new Error("Couldn't reach FinePrint. Check that the app is still running, then try again.");
+    throw new Error(
+      "Couldn't reach FinePrint. Check that the app is still running, then try again.",
+    );
   });
   const body = await response.text();
   if (!response.ok) throw new Error(errorMessage(response.status, body));
@@ -52,23 +64,31 @@ async function request(url, options) {
 
 // ---- Uploads: extracted text goes into the visible textarea so the user sees what the AI sees.
 
-for (const input of document.querySelectorAll("input[type=file]")) {
+for (const input of fileInputs) {
   input.addEventListener("change", async () => {
     const file = input.files[0];
     if (!file) return;
     const kind = fileKind(file.name);
+    input.removeAttribute("aria-invalid");
     if (!kind) {
-      showError("Only PDF, DOCX, TXT and MD files are supported. For other formats, paste the text.");
+      input.setAttribute("aria-invalid", "true");
+      showError(
+        "Only PDF, DOCX, TXT and MD files are supported. For other formats, paste the text.",
+      );
       input.value = "";
       return;
     }
     setBusy(`Reading ${file.name}…`);
     try {
-      const { text } = await request(`/api/documents/text?kind=${kind}`, { method: "POST", body: file });
+      const url = `/api/documents/text?kind=${kind}`;
+      const { text } = await request(url, { method: "POST", body: file });
       $(input.dataset.target).value = text;
-      statusLine.textContent =
-        `Extracted ${text.length.toLocaleString()} characters from ${file.name}. Check the text before continuing.`;
+      announce(
+        `Extracted ${text.length.toLocaleString()} characters from ${file.name}. ` +
+          "Check the text before continuing.",
+      );
     } catch (error) {
+      input.setAttribute("aria-invalid", "true");
       showError(error.message);
     } finally {
       setBusy(null);
@@ -102,7 +122,7 @@ $("assist-form").addEventListener("submit", async (event) => {
       body: JSON.stringify({ documents, question, context: $("context").value }),
     });
     render(response, question, documents.length === 2);
-    statusLine.textContent = "Done.";
+    announce("Done.");
   } catch (error) {
     showError(error.message); // inputs are left untouched so nothing is lost
   } finally {
@@ -123,8 +143,11 @@ function render(response, question, twoDocuments) {
 
   const result = response.result;
   $("analysis-heading").textContent = HEADINGS[response.task];
+  const perspective =
+    `Assessed for: ${result.perspective}. ` +
+    "If that isn't you, describe your situation above and run it again.";
   $("analysis-body").replaceChildren(
-    el("p", `Assessed for: ${result.perspective}. If that isn't you, describe your situation above and run it again.`, "perspective"),
+    el("p", perspective, "perspective"),
     renderWarnings(response.warnings),
     ...(response.task === "analyze" ? renderAnalysis(result) : renderComparison(result)),
   );
@@ -137,7 +160,9 @@ function renderAnalysis(result) {
     section("Summary", [el("p", `${result.document_type}. ${result.summary}`)]),
     section("Risks and unusual clauses", result.risks.map(renderRisk)),
     listSection("Inconsistencies", result.inconsistencies),
-    section("Key terms", result.key_terms.map((term) => finding(`${term.label}: ${term.value}`, [term.quote]))),
+    section("Key terms", result.key_terms.map(
+      (term) => finding(`${term.label}: ${term.value}`, [term.quote]),
+    )),
     section("Obligations", result.obligations.map(
       (duty) => finding(`${duty.party}: ${duty.description} (${duty.when})`, [duty.quote]),
     )),
@@ -162,7 +187,8 @@ function renderAnswer(response, question, twoDocuments) {
   const article = el("article", null, "answer");
   const heading = el("h3", question);
   heading.tabIndex = -1;
-  const support = el("p", SUPPORT[result.supported_by_document], `badge support-${result.supported_by_document}`);
+  const supported = result.supported_by_document;
+  const support = el("p", SUPPORT[supported], `badge support-${supported}`);
   article.append(heading, renderWarnings(response.warnings), support, el("p", result.answer));
   if (result.quotes.length) article.append(renderQuotes(result.quotes, twoDocuments));
   if (result.caveats.length) article.append(listSection("Caveats", result.caveats, "ul", "h4"));
@@ -198,16 +224,17 @@ function renderWarnings(warnings) {
   return list;
 }
 
-function severityHeading(severity, title) {
+function severityHeading(severity, noun, title) {
   const heading = el("h4");
-  heading.append(el("span", severityLabel(severity), "badge"), title);
+  // The space keeps screen readers from running the badge and the title together.
+  heading.append(el("span", severityLabel(severity, noun), "badge"), " ", title);
   return heading;
 }
 
 function renderRisk(risk) {
   const article = el("article", null, `finding severity-${risk.severity}`);
   article.append(
-    severityHeading(risk.severity, risk.title),
+    severityHeading(risk.severity, "risk", risk.title),
     el("p", risk.plain_language),
     el("p", `Why it matters: ${risk.why_it_matters}`),
     renderQuotes(risk.quotes),
@@ -223,9 +250,10 @@ function renderDifference(difference) {
     el("dt", "Document B"), el("dd", difference.document_b),
   );
   article.append(
-    severityHeading(difference.severity, difference.topic),
+    severityHeading(difference.severity, "impact", difference.topic),
     sides,
     el("p", `What it means for you: ${difference.impact}`),
+    el("p", preferenceLabel(difference.better_for_you), "preference"),
     renderQuotes(difference.quotes, true),
   );
   return article;
@@ -240,7 +268,9 @@ function finding(text, quotes) {
 function renderQuotes(quotes, labelled = false) {
   const box = el("div", null, "quotes");
   if (!quotes.some((quote) => quote.text)) {
-    box.append(el("p", "No quote could be matched to your document for this point. Treat it with caution.", "unmatched"));
+    const caution =
+      "No quote could be matched to your document for this point. Treat it with caution.";
+    box.append(el("p", caution, "unmatched"));
     return box;
   }
   for (const quote of quotes) {
@@ -266,7 +296,10 @@ function showInDocument(quote) {
   const textarea = $(quote.document === "B" ? "document-b" : "document-a");
   const range = passageRange(textarea.value, quote.text);
   if (!range) {
-    statusLine.textContent = "Couldn't find this passage in the document text. It may have changed since these results.";
+    announce(
+      "Couldn't find this passage in the document text. " +
+        "It may have changed since these results.",
+    );
     return;
   }
   textarea.focus();
@@ -281,8 +314,8 @@ $("copy").addEventListener("click", async () => {
   document.body.classList.remove("copying");
   try {
     await navigator.clipboard.writeText(text);
-    statusLine.textContent = "Copied.";
+    announce("Copied.");
   } catch {
-    statusLine.textContent = "Couldn't copy. Select the text and copy it yourself.";
+    announce("Couldn't copy. Select the text and copy it yourself.");
   }
 });

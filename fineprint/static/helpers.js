@@ -34,7 +34,13 @@ export function passageRange(text, passage) {
   return start < 0 ? null : [start, start + passage.length];
 }
 
-/** "high" -> "High": severity is shown as a word, never by colour alone. */
-export function severityLabel(severity) {
-  return severity ? severity[0].toUpperCase() + severity.slice(1) : "";
+/** ("high", "risk") -> "High risk": severity is shown in words, never by colour alone. */
+export function severityLabel(severity, noun) {
+  return severity ? `${severity[0].toUpperCase()}${severity.slice(1)} ${noun}` : "";
+}
+
+/** Which version of a clause serves the reader better, in words. */
+export function preferenceLabel(betterForYou) {
+  return { A: "Better for you: Document A", B: "Better for you: Document B" }[betterForYou]
+    ?? "Neither version is clearly better for you";
 }

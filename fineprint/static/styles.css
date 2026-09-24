@@ -73,7 +73,8 @@ progress {
   font-weight: 600;
 }
 
-.next-step {
+.next-step,
+.preference {
   font-weight: 600;
 }
 
@@ -157,6 +158,13 @@ dd {
 
 .copying .no-print {
   display: none !important;
+}
+
+/* The status line already says a request is running; skip the animated bar if asked. */
+@media (prefers-reduced-motion: reduce) {
+  progress {
+    display: none;
+  }
 }
 
 @media print {
