@@ -9,6 +9,9 @@ passage.
 
 It gives information about a text, not legal advice, and says so on every result.
 
+**Live demo:** <https://fineprint-1056761597541.asia-south1.run.app> (Google Cloud Run). The
+samples in [`samples/`](samples/) are a good first try.
+
 ## Challenge
 
 Prompt War, legal vertical: *make legal information and basic legal assistance more
@@ -160,11 +163,38 @@ Open <http://localhost:8000>. For development, add `--reload`.
 |---|---|---|---|
 | `GOOGLE_API_KEY` | Yes (`GEMINI_API_KEY` also works) | none | Gemini API key |
 | `GEMINI_MODEL` | No | `gemini-3.5-flash` | Model used for all tasks, e.g. a Pro model for harder documents |
+| `ALLOWED_HOSTS` | When deployed | `localhost,127.0.0.1` | Comma-separated hostnames the app answers to |
+| `ASSIST_LIMIT_PER_CLIENT` | No | `20` | Model requests allowed per client per hour |
+| `ASSIST_LIMIT_TOTAL` | No | `200` | Model requests allowed per hour across all clients |
 
 If no key is set, the app refuses to start and says what to do. Size limits are constants: the upload limit in `web.py`, the
 document limit in `documents.py`, and the question and situation limits in `schemas.py`. The UI
 repeats the last two as `maxlength` in `static/index.html` and the upload limit in the 413
 message in `static/app.js`, so change them together.
+
+## Deployment
+
+The demo runs on Google Cloud Run from the included `Dockerfile`. To deploy your own copy
+(replace `PROJECT`; the region is up to you):
+
+```bash
+gcloud iam service-accounts create fineprint-run --project PROJECT
+printf '%s' "$GOOGLE_API_KEY" | gcloud secrets create fineprint-gemini-api-key --project PROJECT --data-file=-
+gcloud secrets add-iam-policy-binding fineprint-gemini-api-key --project PROJECT \
+  --member serviceAccount:fineprint-run@PROJECT.iam.gserviceaccount.com --role roles/secretmanager.secretAccessor
+gcloud run deploy fineprint --source . --project PROJECT --region asia-south1 \
+  --service-account fineprint-run@PROJECT.iam.gserviceaccount.com \
+  --set-secrets GOOGLE_API_KEY=fineprint-gemini-api-key:latest \
+  --set-env-vars "^@^ALLOWED_HOSTS=<your service hostnames>" \
+  --allow-unauthenticated --max-instances 1 --concurrency 20 --memory 512Mi --timeout 300
+```
+
+Choices behind these flags:
+
+- The key lives in Secret Manager. Only a dedicated service account can read it, so the
+  service never runs with the project's broad default identity.
+- `--max-instances 1` caps cost, and it keeps the in-memory rate limits meaningful.
+- `.dockerignore` and `.gcloudignore` keep `.env` out of both the upload and the image.
 
 ## Usage
 
@@ -237,11 +267,9 @@ one line with its finish reason, token counts (including cached tokens) and dura
 - **Untrusted model output.** The output is schema-validated, its stop reason is checked first, its quotes are verified, and it is rendered with `textContent` only, never as HTML.
 - **Prompt injection.** The system prompt treats document text as material, not instructions, and the output schema is fixed. This reduces the risk but cannot eliminate it, which is why extracted text is shown to the user and quotes are verified.
 - **Privacy in logs and errors.** Logs hold sizes, durations, token counts and request ids, never document text, questions or file names. Validation errors are rebuilt from field names so they never echo the submitted document.
-- **Local-only by design.** The app binds to localhost, rejects other `Host` headers (a DNS-rebinding guard, because the server spends your API key) and sends a strict CSP, `nosniff` and `no-referrer`.
+- **Hosts and headers.** The app answers only to the hostnames in `ALLOWED_HOSTS`. That is a DNS-rebinding guard when run locally, because the server spends your API key. It also sends a strict CSP, `nosniff` and `no-referrer`.
+- **Spend limits.** `/api/assist` is the only endpoint that calls the model, and it is rate limited per client and in total. The total is the hard cap, since client addresses from proxy headers can be spoofed. The deployed service runs on a single instance, uses HTTPS, and reads its key from Secret Manager.
 
-Before exposing it beyond your own machine, add:
-
-- authentication
-- per-user rate limiting and uvicorn's `--limit-concurrency`
-- HTTPS
-- your hostname in `ALLOWED_HOSTS`
+The public demo has no login, by design, so evaluators can use it. Anything beyond a demo
+would need authentication, and a shared store such as Redis for rate limits if it runs on
+more than one instance.
