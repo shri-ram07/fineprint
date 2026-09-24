@@ -21,7 +21,13 @@ class FakeLLM:
         self.calls: list[dict[str, Any]] = []
 
     async def complete(
-        self, *, system: str, documents: dict[str, str], request: str, output_model: type
+        self,
+        *,
+        system: str,
+        documents: dict[str, str],
+        request: str,
+        output_model: type,
+        effort: str = "default",
     ) -> Any:
         self.calls.append(
             {
@@ -29,6 +35,7 @@ class FakeLLM:
                 "documents": documents,
                 "request": request,
                 "output_model": output_model,
+                "effort": effort,
             }
         )
         if self.error:

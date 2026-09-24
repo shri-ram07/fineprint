@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from pydantic import ValidationError
 
-from fineprint.assistant import assist, resolve_task, verify_quotes
+from fineprint.assistant import ResultCache, assist, resolve_task, verify_quotes
 from fineprint.documents import MAX_DOCUMENT_CHARS
 from fineprint.llm import LLMError
 from fineprint.schemas import Answer, AssistRequest, Comparison, Difference, Quote, Risk
@@ -14,8 +14,8 @@ PDF_LIKE = (
 )
 
 
-def run(request: AssistRequest, llm) -> object:
-    return asyncio.run(assist(request, llm))
+def run(request: AssistRequest, llm, cache: ResultCache | None = None) -> object:
+    return asyncio.run(assist(request, llm, cache))
 
 
 def quote(text: str, document: str = "A") -> Quote:
@@ -226,3 +226,55 @@ def test_llm_errors_propagate(llm, lease):
     llm.error = LLMError("unavailable")
     with pytest.raises(LLMError):
         run(AssistRequest(documents=[lease]), llm)
+
+
+def test_only_questions_use_low_reasoning_effort(llm, lease):
+    run(AssistRequest(documents=[lease]), llm)
+
+    llm.result = Comparison(perspective="", summary="", differences=[], questions_for_lawyer=[])
+    run(AssistRequest(documents=[lease, lease]), llm)
+
+    llm.result = answer_with()
+    run(AssistRequest(documents=[lease], question="Can I sublet?"), llm)
+
+    assert [call["effort"] for call in llm.calls] == ["default", "default", "low"]
+
+
+def test_cache_answers_identical_requests_without_the_model(llm, lease):
+    cache = ResultCache(size=8)
+    first = run(AssistRequest(documents=[lease]), llm, cache)
+    second = run(AssistRequest(documents=[lease]), llm, cache)
+    assert second == first
+    assert len(llm.calls) == 1
+
+    run(AssistRequest(documents=[lease], context="I'm the landlord"), llm, cache)
+    assert len(llm.calls) == 2  # a different situation is a different answer
+
+
+def test_cache_returns_copies_and_evicts_the_oldest(llm, lease):
+    cache = ResultCache(size=1)
+    run(AssistRequest(documents=[lease]), llm, cache).result.summary = "changed by the caller"
+    assert (
+        run(AssistRequest(documents=[lease]), llm, cache).result.summary != "changed by the caller"
+    )
+
+    run(AssistRequest(documents=[lease], context="new"), llm, cache)  # evicts the first entry
+    run(AssistRequest(documents=[lease]), llm, cache)
+    assert len(llm.calls) == 3
+
+
+def test_failures_are_not_cached(llm, lease):
+    cache = ResultCache()
+    llm.error = LLMError("unavailable")
+    with pytest.raises(LLMError):
+        run(AssistRequest(documents=[lease]), llm, cache)
+    llm.error = None
+    run(AssistRequest(documents=[lease]), llm, cache)
+    assert len(llm.calls) == 2
+
+
+def test_zero_size_cache_is_disabled(llm, lease):
+    cache = ResultCache(size=0)
+    run(AssistRequest(documents=[lease]), llm, cache)
+    run(AssistRequest(documents=[lease]), llm, cache)
+    assert len(llm.calls) == 2

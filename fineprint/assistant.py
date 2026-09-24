@@ -5,12 +5,16 @@ task to run, whether each quote really appears in the document, how findings are
 and which warnings the user sees. The model is only asked for language understanding.
 """
 
+import hashlib
+import json
 import unicodedata
+from collections import OrderedDict
+from functools import lru_cache
 from typing import NamedTuple
 
 from pydantic import BaseModel
 
-from .llm import LLMClient
+from .llm import Effort, LLMClient
 from .prompts import SYSTEM_PROMPT, user_instruction
 from .schemas import (
     Analysis,
@@ -34,6 +38,8 @@ _OUTPUT_MODELS: dict[Task, type[BaseModel]] = {
     "ask": Answer,
     "compare": Comparison,
 }
+# A question is a lookup in the document; analysis and comparison need full reasoning.
+_EFFORT: dict[Task, Effort] = {"analyze": "default", "ask": "low", "compare": "default"}
 _LABELS = ("A", "B")
 _SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 # Money, percentages and section signs carry meaning in legal quotes, so they must match too.
@@ -49,12 +55,52 @@ def resolve_task(request: AssistRequest) -> Task:
     return "analyze"
 
 
-async def assist(request: AssistRequest, llm: LLMClient) -> AssistResponse:
+class ResultCache:
+    """A bounded, least-recently-used store of finished responses.
+
+    Identical requests (a re-submit, a refresh, the same sample tried twice) are answered
+    without another model call. It lives in memory for the life of the process only and
+    stores nothing on disk. A size of 0 disables it.
+    """
+
+    def __init__(self, size: int = 128) -> None:
+        self.size = size
+        self._items: OrderedDict[str, AssistResponse] = OrderedDict()
+
+    @staticmethod
+    def key(request: AssistRequest) -> str:
+        # Everything that shapes the answer; the task is derived from these fields.
+        payload = json.dumps([request.documents, request.question, request.context])
+        return hashlib.sha256(payload.encode()).hexdigest()
+
+    def get(self, key: str) -> AssistResponse | None:
+        if key not in self._items:
+            return None
+        self._items.move_to_end(key)
+        return self._items[key].model_copy(deep=True)
+
+    def put(self, key: str, response: AssistResponse) -> None:
+        if self.size <= 0:
+            return
+        self._items[key] = response.model_copy(deep=True)
+        self._items.move_to_end(key)
+        if len(self._items) > self.size:
+            self._items.popitem(last=False)
+
+
+async def assist(
+    request: AssistRequest, llm: LLMClient, cache: ResultCache | None = None
+) -> AssistResponse:
     """Run the resolved task and return a result whose quotes are verified against the source.
 
     Raises:
-        LLMError: the model call failed; the error carries a user-facing message.
+        LLMError: the model call failed; the error carries a user-facing message. Failures
+            are never cached.
     """
+    key = ResultCache.key(request) if cache else ""
+    if cache and (cached := cache.get(key)):
+        return cached
+
     task = resolve_task(request)
     documents = dict(zip(_LABELS, request.documents, strict=False))
     result = await llm.complete(
@@ -62,18 +108,22 @@ async def assist(request: AssistRequest, llm: LLMClient) -> AssistResponse:
         documents=documents,
         request=user_instruction(task, question=request.question, context=request.context),
         output_model=_OUTPUT_MODELS[task],
+        effort=_EFFORT[task],
     )
     unmatched = verify_quotes(result, documents)
     if isinstance(result, Analysis):
         result.risks.sort(key=lambda risk: _SEVERITY_ORDER[risk.severity])
     elif isinstance(result, Comparison):
         result.differences.sort(key=lambda difference: _SEVERITY_ORDER[difference.severity])
-    return AssistResponse(
+    response = AssistResponse(
         task=task,
         result=result,
         warnings=_warnings(result, unmatched),
         disclaimer=DISCLAIMER,
     )
+    if cache:
+        cache.put(key, response)
+    return response
 
 
 def _warnings(result: BaseModel, unmatched: int) -> list[str]:
@@ -102,6 +152,17 @@ class _Source(NamedTuple):
     positions: list[int]
 
 
+@lru_cache(maxsize=4096)
+def _fold(char: str) -> str:
+    """The comparable form of one character (often empty). A document uses few distinct
+    characters, so memoising this skips almost every Unicode normalisation."""
+    return "".join(
+        folded
+        for folded in unicodedata.normalize("NFKD", char).casefold()
+        if folded.isalnum() or folded in _KEPT_SYMBOLS
+    )
+
+
 def _fingerprint(text: str) -> tuple[str, list[int]]:
     """Reduce text to the characters that matter for matching, remembering where each came from.
 
@@ -112,10 +173,14 @@ def _fingerprint(text: str) -> tuple[str, list[int]]:
     kept: list[str] = []
     positions: list[int] = []
     for index, char in enumerate(text):
-        for folded in unicodedata.normalize("NFKD", char).casefold():
-            if folded.isalnum() or folded in _KEPT_SYMBOLS:
-                kept.append(folded)
-                positions.append(index)
+        folded = _fold(char)
+        if not folded:  # whitespace and punctuation: most non-letters
+            continue
+        kept.append(folded)
+        if len(folded) == 1:
+            positions.append(index)
+        else:  # a ligature such as "ﬁ" folds to several characters
+            positions.extend([index] * len(folded))
     return "".join(kept), positions
 
 

@@ -19,10 +19,15 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-DEFAULT_MODEL = "gemini-3.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 # Thinking tokens count against this ceiling, so it is set well above the visible output.
 MAX_OUTPUT_TOKENS = 32_000
+# A hung request must not hold a worker forever; long analyses take well under a minute.
+REQUEST_TIMEOUT_MS = 120_000
+# Transient failures (429, 5xx) are retried with backoff by the SDK before we give up.
+RETRY_ATTEMPTS = 3
 
+Effort = Literal["low", "default"]
 LLMErrorCode = Literal["configuration", "declined", "truncated", "malformed", "unavailable"]
 
 _MESSAGES: dict[LLMErrorCode, str] = {
@@ -55,11 +60,18 @@ class LLMError(Exception):
 
 class LLMClient(Protocol):
     async def complete(
-        self, *, system: str, documents: dict[str, str], request: str, output_model: type[T]
+        self,
+        *,
+        system: str,
+        documents: dict[str, str],
+        request: str,
+        output_model: type[T],
+        effort: Effort = "default",
     ) -> T:
         """Return the model's answer validated as `output_model`, or raise `LLMError`.
 
         `documents` maps a label ("A", "B") to the document text; `request` is the task.
+        `effort="low"` asks for less reasoning, for simple lookups.
         """
         ...
 
@@ -73,45 +85,77 @@ def _code_for_error(exc: errors.APIError) -> LLMErrorCode:
     return "malformed"  # the request itself was rejected: a bug on our side
 
 
+def _wrap_document(label: str, text: str) -> str:
+    # A document must not be able to close its own tag and add text that reads as ours.
+    # Quote matching ignores the extra backslash, so verification is unaffected.
+    safe = text.replace("</document", "<\\/document")
+    return f'<document id="{label}">\n{safe}\n</document>'
+
+
 class GeminiLLM:
     def __init__(self, model: str, client: Client | None = None) -> None:
         try:
             # Reads GOOGLE_API_KEY (or GEMINI_API_KEY) and fails now, at startup, if neither
             # is set, instead of on the user's first request.
-            client = client or Client()
+            client = client or Client(
+                http_options=types.HttpOptions(
+                    timeout=REQUEST_TIMEOUT_MS,
+                    retry_options=types.HttpRetryOptions(attempts=RETRY_ATTEMPTS),
+                )
+            )
         except ValueError:
             raise LLMError("configuration", NO_CREDENTIALS) from None
         self.model = Gemini(model=model, client=client)
+        self._runners: dict[tuple[type[BaseModel], Effort], InMemoryRunner] = {}
 
     @classmethod
     def from_env(cls) -> "GeminiLLM":
         return cls(os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL)
 
+    def _runner(self, system: str, output_model: type[BaseModel], effort: Effort) -> InMemoryRunner:
+        """One agent and runner per (schema, effort), built on first use and then reused.
+
+        Without `output_key`, ADK returns the raw text instead of validating it, which lets us
+        check why generation stopped before parsing. The system prompt is fixed for the
+        process, so it is safe to bake into the cached agent.
+        """
+        key = (output_model, effort)
+        if key not in self._runners:
+            thinking = (
+                types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+                if effort == "low"
+                else None
+            )
+            agent = LlmAgent(
+                name=_APP,
+                model=self.model,
+                static_instruction=system,  # sent verbatim, unlike `instruction`'s {templating}
+                output_schema=output_model,
+                generate_content_config=types.GenerateContentConfig(
+                    max_output_tokens=MAX_OUTPUT_TOKENS,
+                    thinking_config=thinking,
+                    # No tools are used; this also silences the SDK's per-call AFC warning.
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                ),
+            )
+            self._runners[key] = InMemoryRunner(agent=agent, app_name=_APP)
+        return self._runners[key]
+
     async def complete(
-        self, *, system: str, documents: dict[str, str], request: str, output_model: type[T]
+        self,
+        *,
+        system: str,
+        documents: dict[str, str],
+        request: str,
+        output_model: type[T],
+        effort: Effort = "default",
     ) -> T:
-        # A fresh single-turn agent per request: the app is stateless, so there is no
-        # conversation history to keep. Without `output_key`, ADK returns the raw text
-        # instead of validating it, which lets us check why generation stopped first.
-        agent = LlmAgent(
-            name=_APP,
-            model=self.model,
-            static_instruction=system,  # sent verbatim, unlike `instruction`'s {templating}
-            output_schema=output_model,
-            generate_content_config=types.GenerateContentConfig(
-                max_output_tokens=MAX_OUTPUT_TOKENS,
-                # No tools are used; this also silences the SDK's per-call AFC warning.
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-            ),
-        )
-        runner = InMemoryRunner(agent=agent, app_name=_APP)
-        session = await runner.session_service.create_session(app_name=_APP, user_id=_USER)
+        runner = self._runner(system, output_model, effort)
+        sessions = runner.session_service
+        session = await sessions.create_session(app_name=_APP, user_id=_USER)
         # Documents go first so repeated questions about the same document share a prefix,
         # which Gemini caches implicitly.
-        parts = [
-            types.Part(text=f'<document id="{label}">\n{text}\n</document>')
-            for label, text in documents.items()
-        ]
+        parts = [types.Part(text=_wrap_document(label, text)) for label, text in documents.items()]
         parts.append(types.Part(text=request))
 
         started = time.perf_counter()
@@ -130,15 +174,19 @@ class GeminiLLM:
         except OSError as exc:  # connection failures and timeouts
             logger.error("Gemini API unreachable: %s", type(exc).__name__)
             raise LLMError("unavailable") from None
+        finally:
+            # Each request is one turn; dropping the session keeps memory flat.
+            await sessions.delete_session(app_name=_APP, user_id=_USER, session_id=session.id)
 
         if final is None:
             logger.error("Gemini returned no final response")
             raise LLMError("malformed")
         usage = final.usage_metadata
         logger.info(
-            "model=%s finish=%s error=%s input_tokens=%s output_tokens=%s thinking_tokens=%s "
-            "cached_tokens=%s duration=%.1fs",
+            "model=%s effort=%s finish=%s error=%s input_tokens=%s output_tokens=%s "
+            "thinking_tokens=%s cached_tokens=%s duration=%.1fs",
             self.model.model,
+            effort,
             final.finish_reason,
             final.error_code,
             usage and usage.prompt_token_count,
