@@ -3,18 +3,20 @@
 Run with: uv run --env-file .env uvicorn --factory fineprint.web:create_app
 """
 
+import asyncio
+import ipaddress
 import logging
 import os
 import time
-from collections import defaultdict, deque
-from collections.abc import Callable
+from collections import OrderedDict, deque
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -46,6 +48,8 @@ SECURITY_HEADERS = {
 }
 STATIC_CACHE_CONTROL = "public, max-age=3600"
 TOO_MANY_REQUESTS = "Too many requests right now. Please try again in a while."
+# PDF parsing can use a lot of memory; parse at most this many files at once.
+MAX_CONCURRENT_PARSES = 2
 
 
 class RateLimiter:
@@ -60,15 +64,15 @@ class RateLimiter:
     def __init__(self, limit: int, window_seconds: float = 3600) -> None:
         self.limit = limit
         self.window = window_seconds
-        self._events: dict[str, deque[float]] = defaultdict(deque)
+        # Ordered by last use, so the least recently seen client is evicted first in O(1).
+        self._events: OrderedDict[str, deque[float]] = OrderedDict()
 
     def allow(self, key: str, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now
+        events = self._events.setdefault(key, deque())
+        self._events.move_to_end(key)
         if len(self._events) > self.MAX_KEYS:  # bound memory against many distinct clients
-            self._events = defaultdict(
-                deque, {k: v for k, v in self._events.items() if v and now - v[-1] < self.window}
-            )
-        events = self._events[key]
+            self._events.popitem(last=False)
         while events and now - events[0] >= self.window:
             events.popleft()
         if len(events) >= self.limit:
@@ -92,11 +96,25 @@ def client_address(request: Request, trusted_proxy_hops: int) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _limit(proxy_hops: int, per_client: RateLimiter, total: RateLimiter | None = None) -> Callable:
+def rate_limit_key(address: str) -> str:
+    """One key per client. An IPv6 user typically controls a whole /64 network, so it is
+    grouped by that network; anything that isn't an IP address is used as is."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if ip.version == 6:
+        return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+    return str(ip)
+
+
+def _limit(
+    proxy_hops: int, per_client: RateLimiter, total: RateLimiter | None = None
+) -> Callable[[Request], None]:
     """A route dependency that answers 429 once a client, or everyone together, hits a limit."""
 
     def check(request: Request) -> None:
-        within = per_client.allow(client_address(request, proxy_hops))
+        within = per_client.allow(rate_limit_key(client_address(request, proxy_hops)))
         if not within or (total is not None and not total.allow("*")):
             logger.warning("Rate limit reached on %s", request.url.path)
             raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS)
@@ -124,6 +142,7 @@ def create_app(llm: LLMClient | None = None) -> FastAPI:
         RateLimiter(_setting("ASSIST_LIMIT_TOTAL", 200)),
     )
     limit_upload = _limit(proxy_hops, RateLimiter(_setting("UPLOAD_LIMIT_PER_CLIENT", 60)))
+    parsing = asyncio.Semaphore(MAX_CONCURRENT_PARSES)
 
     # The interactive API docs load scripts from a CDN, which the CSP forbids; the README
     # documents the API endpoints instead.
@@ -135,7 +154,9 @@ def create_app(llm: LLMClient | None = None) -> FastAPI:
     app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_BODY_BYTES)
 
     @app.middleware("http")
-    async def guard_and_harden(request: Request, call_next):
+    async def guard_and_harden(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         # Browsers send Origin on cross-site POSTs. The upload endpoint takes a raw body, which
         # a foreign page could post without a CORS preflight, so cross-site POSTs are refused.
         origin = request.headers.get("origin")
@@ -184,7 +205,8 @@ def create_app(llm: LLMClient | None = None) -> FastAPI:
     async def document_text(request: Request, kind: DocumentKind) -> dict[str, str]:
         """Extract text from a file sent as the raw request body (`?kind=pdf|docx|txt|md`)."""
         data = await request.body()
-        text = await run_in_threadpool(extract_text, kind, data)
+        async with parsing:
+            text = await run_in_threadpool(extract_text, kind, data)
         logger.info("Extracted %d characters from a %s upload", len(text), kind)
         return {"text": text}
 

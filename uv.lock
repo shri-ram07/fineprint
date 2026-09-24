@@ -458,7 +458,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "google-adk", specifier = ">=2.9,<3" },
     { name = "httpx2", marker = "extra == 'dev'" },
-    { name = "pypdf", extras = ["crypto"], specifier = ">=5" },
+    { name = "pypdf", extras = ["crypto"], specifier = ">=6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "starlette", specifier = ">=1.6" },

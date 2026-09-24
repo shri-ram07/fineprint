@@ -1,7 +1,7 @@
 # Production image for Cloud Run (or any container host).
-# The base image is pinned by digest for reproducible, tamper-evident builds.
+# Both images are pinned by digest for reproducible, tamper-evident builds.
 FROM python:3.11-slim@sha256:da047cb8f9d1d98e5c070f5300ba9f7274e33b8fc0e5be5ed88740aed1b95ba9
-COPY --from=ghcr.io/astral-sh/uv:0.11.23 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.23@sha256:d0a0a753ab981624b49c97abc98821c1c09f4ca69d1ef5cee69c501be3d88479 /uv /bin/uv
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy PATH="/app/.venv/bin:$PATH"

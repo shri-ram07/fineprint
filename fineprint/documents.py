@@ -110,8 +110,8 @@ def _pdf_text(data: bytes, max_chars: int) -> str:
         # user and the model both know something is missing.
         pages.append(page_text or f"[Page {number}: no readable text - scanned image?]")
         length += len(pages[-1])
-        # ponytail: bounds accumulation across pages; a single decompression-bomb page is
-        # still expanded by pypdf. Add a per-stream limit if uploads ever become untrusted at scale.
+        # Bounds accumulation across pages. A single page's streams are capped by pypdf
+        # (75 MB decompressed each), and the web layer parses at most two files at once.
         if length > max_chars:
             raise _too_large(max_chars)
     if not found_text:

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from fineprint import web
 from fineprint.documents import MAX_DOCUMENT_CHARS
 from fineprint.llm import LLMError
-from fineprint.web import SECURITY_HEADERS, RateLimiter
+from fineprint.web import SECURITY_HEADERS, RateLimiter, rate_limit_key
 
 
 @pytest.fixture
@@ -156,3 +156,47 @@ def test_identical_requests_are_answered_from_the_cache(client, llm, lease):
     second = client.post("/api/assist", json={"documents": [lease]})
     assert first.json() == second.json()
     assert len(llm.calls) == 1
+
+
+def test_total_cap_applies_across_clients(monkeypatch, llm, lease):
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    monkeypatch.setenv("ASSIST_LIMIT_TOTAL", "1")
+    client = TestClient(web.create_app(llm), base_url="http://localhost")
+
+    def post(address: str):
+        headers = {"X-Forwarded-For": address}
+        return client.post("/api/assist", json={"documents": [lease]}, headers=headers)
+
+    assert post("203.0.113.7").status_code == 200
+    assert post("198.51.100.9").status_code == 429
+
+
+def test_missing_forwarding_header_falls_back_to_the_socket_address(monkeypatch, llm):
+    monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
+    monkeypatch.setenv("UPLOAD_LIMIT_PER_CLIENT", "1")
+    client = TestClient(web.create_app(llm), base_url="http://localhost")
+    assert client.post("/api/documents/text?kind=txt", content=b"Rent").status_code == 200
+    assert client.post("/api/documents/text?kind=txt", content=b"Rent").status_code == 429
+
+
+@pytest.mark.parametrize(
+    ("address", "key"),
+    [
+        ("2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"),
+        ("2001:db8:1:2:bbbb::9", "2001:db8:1:2::/64"),
+        ("203.0.113.7", "203.0.113.7"),
+        ("testclient", "testclient"),
+    ],
+)
+def test_ipv6_clients_are_limited_per_network(address, key):
+    assert rate_limit_key(address) == key
+
+
+def test_rate_limiter_forgets_the_least_recently_seen_client(monkeypatch):
+    monkeypatch.setattr(RateLimiter, "MAX_KEYS", 2)
+    limiter = RateLimiter(limit=1)
+    assert limiter.allow("a", now=0)
+    assert limiter.allow("b", now=1)
+    assert limiter.allow("c", now=2)  # "a" is evicted to stay within MAX_KEYS
+    assert limiter.allow("a", now=3)  # so it starts afresh
+    assert not limiter.allow("c", now=4)

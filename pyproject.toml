@@ -9,7 +9,7 @@ dependencies = [
     "fastapi>=0.115",
     "starlette>=1.6",
     "uvicorn>=0.30",
-    "pypdf[crypto]>=5",
+    "pypdf[crypto]>=6",
     "defusedxml>=0.7",
 ]
 
@@ -22,6 +22,14 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["fineprint"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 98
+show_missing = true
 
 [tool.ruff]
 line-length = 100
