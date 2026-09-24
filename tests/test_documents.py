@@ -177,3 +177,12 @@ def test_pdf_extraction_stops_once_the_limit_is_passed(monkeypatch):
 @pytest.mark.parametrize("data", [b"", b"\n\n  \n"])
 def test_empty_input(data):
     assert error_code("txt", data) == "empty"
+
+
+def test_docx_with_entity_expansion_is_rejected():
+    bomb = (
+        '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY a "aaaaaaaaaa">'
+        '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>'
+        f"<w:document {W}><w:body><w:p><w:r><w:t>&b;</w:t></w:r></w:p></w:body></w:document>"
+    )
+    assert error_code("docx", make_docx(bomb)) == "corrupt"

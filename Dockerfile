@@ -1,5 +1,6 @@
 # Production image for Cloud Run (or any container host).
-FROM python:3.11-slim
+# The base image is pinned by digest for reproducible, tamper-evident builds; Dependabot bumps it.
+FROM python:3.11-slim@sha256:da047cb8f9d1d98e5c070f5300ba9f7274e33b8fc0e5be5ed88740aed1b95ba9
 COPY --from=ghcr.io/astral-sh/uv:0.11.23 /uv /bin/uv
 
 WORKDIR /app
@@ -14,6 +15,6 @@ RUN uv sync --locked
 RUN useradd --no-create-home app
 USER app
 
-# Cloud Run sets PORT and sits behind Google's front end, so trust its forwarding headers.
-CMD exec uvicorn --factory fineprint.web:create_app --host 0.0.0.0 --port "${PORT:-8080}" \
-    --proxy-headers --forwarded-allow-ips="*"
+# Cloud Run sets PORT. Client addresses for rate limiting are read by the app itself
+# (TRUSTED_PROXY_HOPS), not by uvicorn's proxy mode, which trusts the forgeable leftmost hop.
+CMD exec uvicorn --factory fineprint.web:create_app --host 0.0.0.0 --port "${PORT:-8080}"

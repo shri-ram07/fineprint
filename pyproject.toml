@@ -10,6 +10,7 @@ dependencies = [
     "starlette>=1.6",
     "uvicorn>=0.30",
     "pypdf[crypto]>=5",
+    "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]
@@ -27,10 +28,14 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "PLW1514"]
+select = ["E", "F", "I", "B", "UP", "S", "PLW1514"]
 # PLW1514 (open() without encoding=) is a preview rule; Windows defaults to cp1252.
 preview = true
 explicit-preview-rules = true
+
+[tool.ruff.lint.per-file-ignores]
+# pytest asserts are how tests work; fixed fake keys in tests are not secrets.
+"tests/**" = ["S101", "S105", "S106"]
 
 [tool.ruff.format]
 line-ending = "lf"

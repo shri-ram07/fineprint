@@ -11,8 +11,9 @@ import logging
 import re
 import zipfile
 from typing import Literal
-from xml.etree import ElementTree
+from xml.etree.ElementTree import Element
 
+from defusedxml.ElementTree import fromstring as parse_xml
 from pypdf import PdfReader
 from pypdf.errors import FileNotDecryptedError
 
@@ -130,11 +131,12 @@ def _docx_text(data: bytes) -> str:
         raise DocumentError("too_large", "This Word document is too large to process.")
 
     parts: list[str] = []
-    _collect_docx_text(ElementTree.fromstring(xml), parts)
+    # defusedxml refuses DTDs and entity expansion, the classic XML attacks on uploads.
+    _collect_docx_text(parse_xml(xml), parts)
     return "".join(parts)
 
 
-def _collect_docx_text(node: ElementTree.Element, parts: list[str]) -> None:
+def _collect_docx_text(node: Element, parts: list[str]) -> None:
     """Walk the document once, in order. Paragraphs nested in text boxes are visited once,
     and Word's legacy copy of each text box (mc:Fallback) is skipped so nothing repeats."""
     for child in node:
