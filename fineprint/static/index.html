@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FinePrint: understand a legal document</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>FinePrint</h1>
+    <p class="no-print">Understand a contract, lease or policy in plain language: what it says,
+      what to watch out for, and what to ask a lawyer. Every quote is checked against your document.</p>
+  </header>
+
+  <main>
+    <form id="assist-form" class="no-print">
+      <fieldset>
+        <legend>Your document</legend>
+        <label for="file-a">Upload a PDF, DOCX, TXT or MD file, or paste the text below</label>
+        <input type="file" id="file-a" data-target="document-a" accept=".pdf,.docx,.txt,.md">
+        <label for="document-a">Document text</label>
+        <textarea id="document-a" rows="12" required maxlength="300000"></textarea>
+      </fieldset>
+
+      <details id="second-document">
+        <summary>Compare with a second document (optional)</summary>
+        <fieldset>
+          <legend>Second document</legend>
+          <label for="file-b">Upload the second document (PDF, DOCX, TXT or MD), or paste its text below</label>
+          <input type="file" id="file-b" data-target="document-b" accept=".pdf,.docx,.txt,.md">
+          <label for="document-b">Second document text</label>
+          <textarea id="document-b" rows="8" maxlength="300000"></textarea>
+        </fieldset>
+      </details>
+
+      <label for="context">Your situation (optional). For example: I'm the tenant. I may need to
+        leave after 6 months. Signing on Friday.</label>
+      <textarea id="context" rows="2" maxlength="500"></textarea>
+
+      <label for="question">Question (optional). Leave blank for a full breakdown first.</label>
+      <input type="text" id="question" maxlength="1000">
+
+      <button type="submit" id="submit">Get help with this document</button>
+      <progress id="progress" aria-labelledby="status" hidden></progress>
+      <p id="status" role="status"></p>
+      <p id="error" role="alert"></p>
+    </form>
+
+    <div id="results" hidden>
+      <p class="toolbar no-print">
+        <button type="button" id="copy">Copy results</button>
+        <span>To keep a copy, print this page and choose "Save as PDF".</span>
+      </p>
+      <p id="disclaimer" class="disclaimer"></p>
+
+      <section id="analysis" aria-labelledby="analysis-heading" hidden>
+        <h2 id="analysis-heading" tabindex="-1"></h2>
+        <div id="analysis-body"></div>
+      </section>
+
+      <section id="answers" aria-labelledby="answers-heading" hidden>
+        <h2 id="answers-heading">Your questions</h2>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
