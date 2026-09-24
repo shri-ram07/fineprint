@@ -1,20 +1,16 @@
-"use strict";
-
 // All model output is inserted with textContent, never as HTML.
+import { errorMessage, fileKind, passageRange, severityLabel } from "./helpers.js";
 
 const $ = (id) => document.getElementById(id);
 const statusLine = $("status");
 const errorLine = $("error");
 
-const SUPPORTED_FILES = ["pdf", "docx", "txt", "md"];
 const HEADINGS = { analyze: "What this document says", compare: "How the two documents differ" };
 const SUPPORT = {
   yes: "Answered by the document",
   partly: "Partly answered by the document",
   no: "Not addressed in the document",
 };
-
-let twoDocuments = false; // label quotes with their document only when there are two
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -24,13 +20,19 @@ function el(tag, text, className) {
 }
 
 // One request at a time: uploading while an analysis runs would change the text under it.
+// Disabling the focused control drops keyboard focus, so it is put back afterwards.
+let focusBeforeBusy = null;
+
 function setBusy(message) {
+  if (message) focusBeforeBusy = document.activeElement;
   $("submit").disabled = Boolean(message);
   for (const input of document.querySelectorAll("input[type=file]")) input.disabled = Boolean(message);
   $("progress").hidden = !message;
   if (message) {
     statusLine.textContent = message;
     errorLine.textContent = "";
+  } else if (focusBeforeBusy && document.activeElement === document.body) {
+    focusBeforeBusy.focus();
   }
 }
 
@@ -44,19 +46,8 @@ async function request(url, options) {
     throw new Error("Couldn't reach FinePrint. Check that the app is still running, then try again.");
   });
   const body = await response.text();
-  let data = null;
-  try {
-    data = JSON.parse(body);
-  } catch {
-    // Non-JSON bodies (e.g. the server's plain-text 413) are handled below.
-  }
-  if (!response.ok) {
-    const fallback = response.status === 413
-      ? "That file is larger than the 10 MB upload limit."
-      : "Something went wrong. Please try again.";
-    throw new Error((data && data.detail) || fallback);
-  }
-  return data;
+  if (!response.ok) throw new Error(errorMessage(response.status, body));
+  return JSON.parse(body);
 }
 
 // ---- Uploads: extracted text goes into the visible textarea so the user sees what the AI sees.
@@ -65,8 +56,8 @@ for (const input of document.querySelectorAll("input[type=file]")) {
   input.addEventListener("change", async () => {
     const file = input.files[0];
     if (!file) return;
-    const kind = file.name.split(".").pop().toLowerCase();
-    if (!SUPPORTED_FILES.includes(kind)) {
+    const kind = fileKind(file.name);
+    if (!kind) {
       showError("Only PDF, DOCX, TXT and MD files are supported. For other formats, paste the text.");
       input.value = "";
       return;
@@ -88,13 +79,21 @@ for (const input of document.querySelectorAll("input[type=file]")) {
 
 // ---- Submitting
 
+const documentA = $("document-a");
+documentA.addEventListener("input", () => documentA.setCustomValidity(""));
+
 $("assist-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  // `required` accepts whitespace; report a blank document on the field itself.
+  if (!documentA.value.trim()) {
+    documentA.setCustomValidity("Paste or upload a document first.");
+    documentA.reportValidity();
+    return;
+  }
   const question = $("question").value.trim();
-  // Document A is always sent (the server rejects it if blank) so quote labels match the textareas.
+  // Document A is always sent first so quote labels match the textareas.
   const second = $("document-b").value;
-  const documents = second.trim() ? [$("document-a").value, second] : [$("document-a").value];
-  twoDocuments = documents.length === 2;
+  const documents = second.trim() ? [documentA.value, second] : [documentA.value];
   setBusy("Reading your document. Long documents can take a few minutes.");
   try {
     const response = await request("/api/assist", {
@@ -102,7 +101,7 @@ $("assist-form").addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ documents, question, context: $("context").value }),
     });
-    render(response, question);
+    render(response, question, documents.length === 2);
     statusLine.textContent = "Done.";
   } catch (error) {
     showError(error.message); // inputs are left untouched so nothing is lost
@@ -111,11 +110,11 @@ $("assist-form").addEventListener("submit", async (event) => {
   }
 });
 
-function render(response, question) {
+function render(response, question, twoDocuments) {
   $("results").hidden = false;
   $("disclaimer").textContent = response.disclaimer;
   if (response.task === "ask") {
-    renderAnswer(response, question);
+    renderAnswer(response, question, twoDocuments);
     return;
   }
   // A new analysis replaces the old one, and earlier answers no longer describe what is shown.
@@ -137,8 +136,11 @@ function renderAnalysis(result) {
   return [
     section("Summary", [el("p", `${result.document_type}. ${result.summary}`)]),
     section("Risks and unusual clauses", result.risks.map(renderRisk)),
+    listSection("Inconsistencies", result.inconsistencies),
     section("Key terms", result.key_terms.map((term) => finding(`${term.label}: ${term.value}`, [term.quote]))),
-    section("Obligations", result.obligations.map((duty) => finding(`${duty.party}: ${duty.description}`, [duty.quote]))),
+    section("Obligations", result.obligations.map(
+      (duty) => finding(`${duty.party}: ${duty.description} (${duty.when})`, [duty.quote]),
+    )),
     listSection("Missing or unclear", result.missing_or_unclear),
     listSection("Questions to ask a lawyer", result.questions_for_lawyer),
     listSection("Next steps", result.next_steps, "ol"),
@@ -151,18 +153,20 @@ function renderComparison(result) {
     section("Summary", [el("p", result.summary)]),
     section("Differences", result.differences.map(renderDifference)),
     listSection("Questions to ask a lawyer", result.questions_for_lawyer),
+    listSection("Next steps", result.next_steps, "ol"),
   ];
 }
 
-function renderAnswer(response, question) {
+function renderAnswer(response, question, twoDocuments) {
   const result = response.result;
   const article = el("article", null, "answer");
   const heading = el("h3", question);
   heading.tabIndex = -1;
   const support = el("p", SUPPORT[result.supported_by_document], `badge support-${result.supported_by_document}`);
   article.append(heading, renderWarnings(response.warnings), support, el("p", result.answer));
-  if (result.quotes.length) article.append(renderQuotes(result.quotes));
+  if (result.quotes.length) article.append(renderQuotes(result.quotes, twoDocuments));
   if (result.caveats.length) article.append(listSection("Caveats", result.caveats, "ul", "h4"));
+  if (result.next_step) article.append(el("p", `Next step: ${result.next_step}`, "next-step"));
 
   $("answers").hidden = false;
   $("answers").append(article);
@@ -196,7 +200,7 @@ function renderWarnings(warnings) {
 
 function severityHeading(severity, title) {
   const heading = el("h4");
-  heading.append(el("span", `${severity[0].toUpperCase()}${severity.slice(1)}`, "badge"), title);
+  heading.append(el("span", severityLabel(severity), "badge"), title);
   return heading;
 }
 
@@ -222,7 +226,7 @@ function renderDifference(difference) {
     severityHeading(difference.severity, difference.topic),
     sides,
     el("p", `What it means for you: ${difference.impact}`),
-    renderQuotes(difference.quotes),
+    renderQuotes(difference.quotes, true),
   );
   return article;
 }
@@ -233,7 +237,7 @@ function finding(text, quotes) {
   return article;
 }
 
-function renderQuotes(quotes) {
+function renderQuotes(quotes, labelled = false) {
   const box = el("div", null, "quotes");
   if (!quotes.some((quote) => quote.text)) {
     box.append(el("p", "No quote could be matched to your document for this point. Treat it with caution.", "unmatched"));
@@ -245,9 +249,11 @@ function renderQuotes(quotes) {
       continue;
     }
     const block = el("blockquote");
-    if (twoDocuments) block.append(el("span", `Document ${quote.document}`, "source"));
+    if (labelled) block.append(el("span", `Document ${quote.document}`, "source"));
     const show = el("button", "Show in document", "link no-print");
     show.type = "button";
+    // Many of these buttons sit on one page, so each names the passage it jumps to.
+    show.setAttribute("aria-label", `Show in document: ${quote.text.slice(0, 60)}`);
     show.addEventListener("click", () => showInDocument(quote));
     block.append(el("p", quote.text), show);
     box.append(block);
@@ -258,13 +264,13 @@ function renderQuotes(quotes) {
 function showInDocument(quote) {
   if (quote.document === "B") $("second-document").open = true;
   const textarea = $(quote.document === "B" ? "document-b" : "document-a");
-  const start = textarea.value.indexOf(quote.text);
-  if (start < 0) {
+  const range = passageRange(textarea.value, quote.text);
+  if (!range) {
     statusLine.textContent = "Couldn't find this passage in the document text. It may have changed since these results.";
     return;
   }
   textarea.focus();
-  textarea.setSelectionRange(start, start + quote.text.length);
+  textarea.setSelectionRange(...range);
 }
 
 // ---- Copying: the visible results as plain text, without buttons.

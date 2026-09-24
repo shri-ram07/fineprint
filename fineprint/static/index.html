@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FinePrint: understand a legal document</title>
   <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/app.js" defer></script>
+  <script type="module" src="/static/app.js"></script>
 </head>
 <body>
   <header>
     <h1>FinePrint</h1>
     <p class="no-print">Understand a contract, lease or policy in plain language: what it says,
-      what to watch out for, and what to ask a lawyer. Every quote is checked against your document.</p>
+      what to watch out for, and what to ask a lawyer. Every quote is checked against your document.
+      It gives information, not legal advice.</p>
   </header>
 
   <main>
@@ -37,6 +38,7 @@
 
       <label for="context">Your situation (optional). For example: I'm the tenant. I may need to
         leave after 6 months. Signing on Friday.</label>
+      <!-- maxlength values mirror AssistRequest in fineprint/schemas.py -->
       <textarea id="context" rows="2" maxlength="500"></textarea>
 
       <label for="question">Question (optional). Leave blank for a full breakdown first.</label>

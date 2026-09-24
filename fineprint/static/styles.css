@@ -11,6 +11,7 @@
 }
 
 body {
+  overflow-wrap: anywhere; /* long unbroken strings must not force sideways scrolling */
   max-width: 52rem;
   margin: 0 auto;
   padding: 1rem;
@@ -69,6 +70,10 @@ progress {
 
 #error {
   color: var(--high);
+  font-weight: 600;
+}
+
+.next-step {
   font-weight: 600;
 }
 
