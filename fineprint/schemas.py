@@ -1,9 +1,8 @@
 """Request, response and model-output shapes.
 
-Output models are sent to the model as a JSON schema, so they stay plain: every field is
-required, there are no length or range constraints (structured outputs do not enforce
-them), and `extra="forbid"` emits `additionalProperties: false`. Field descriptions travel
-with the schema and act as per-field instructions.
+Output models are sent to the model as its response schema, so they stay plain: every field
+is required and there are no length or range constraints (the model does not enforce them).
+Field descriptions travel with the schema and act as per-field instructions.
 """
 
 from typing import Annotated, Literal
@@ -17,30 +16,26 @@ Severity = Literal["low", "medium", "high"]
 DocumentLabel = Literal["A", "B"]
 
 
-class _ModelOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class Quote(_ModelOutput):
+class Quote(BaseModel):
     document: DocumentLabel = Field(description="The document the passage is copied from.")
     text: str = Field(
         description="One passage copied exactly from that document, ideally under 40 words."
     )
 
 
-class KeyTerm(_ModelOutput):
+class KeyTerm(BaseModel):
     label: str = Field(description="For example: Rent, Start date, Notice period.")
     value: str
     quote: Quote
 
 
-class Obligation(_ModelOutput):
+class Obligation(BaseModel):
     party: str
     description: str = Field(description="What this party must or must not do, in plain words.")
     quote: Quote
 
 
-class Risk(_ModelOutput):
+class Risk(BaseModel):
     title: str
     plain_language: str = Field(description="What the quoted text says, in plain words.")
     why_it_matters: str = Field(description="The concrete consequence for the reader.")
@@ -51,7 +46,7 @@ class Risk(_ModelOutput):
     )
 
 
-class Analysis(_ModelOutput):
+class Analysis(BaseModel):
     perspective: str = Field(description="The party this is written for, e.g. 'the Tenant'.")
     is_legal_document: bool
     document_type: str
@@ -69,14 +64,14 @@ class Analysis(_ModelOutput):
     )
 
 
-class Answer(_ModelOutput):
+class Answer(BaseModel):
     answer: str
     supported_by_document: Literal["yes", "partly", "no"]
     quotes: list[Quote]
     caveats: list[str] = Field(description="Conditions, exceptions or gaps that affect the answer.")
 
 
-class Difference(_ModelOutput):
+class Difference(BaseModel):
     topic: str
     document_a: str = Field(description="What Document A says, or 'Not addressed'.")
     document_b: str = Field(description="What Document B says, or 'Not addressed'.")
@@ -85,7 +80,7 @@ class Difference(_ModelOutput):
     quotes: list[Quote]
 
 
-class Comparison(_ModelOutput):
+class Comparison(BaseModel):
     perspective: str = Field(description="The party this is written for, e.g. 'the Freelancer'.")
     summary: str
     differences: list[Difference]

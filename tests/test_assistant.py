@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from pydantic import ValidationError
 
@@ -10,6 +12,10 @@ PDF_LIKE = (
     "The Tenant shall pay £900 per month. Either party may termi-\nnate on sixty (60) "
     "days’ written notice. The ﬁnal inspection is due on exit. Late fees are 5% of rent."
 )
+
+
+def run(request: AssistRequest, llm) -> object:
+    return asyncio.run(assist(request, llm))
 
 
 def quote(text: str, document: str = "A") -> Quote:
@@ -135,15 +141,12 @@ def test_differences_without_any_quote_count_as_unmatched():
 
 
 def test_analyze_sends_the_document_and_situation_and_sorts_risks(llm, lease):
-    response = assist(AssistRequest(documents=[lease], context="I'm the tenant"), llm)
+    response = run(AssistRequest(documents=[lease], context="I'm the tenant"), llm)
 
     call = llm.calls[0]
-    document, instruction = call["content"]
-    assert document["title"] == "Document A"
-    assert document["source"]["data"] == lease
-    assert document["cache_control"] == {"type": "ephemeral"}
-    assert "cache_control" not in instruction
-    assert "I'm the tenant" in instruction["text"]
+    assert call["documents"] == {"A": lease}
+    assert "I'm the tenant" in call["request"]
+    assert "Analyse Document A" in call["request"]
 
     assert response.task == "analyze"
     assert [risk.severity for risk in response.result.risks] == ["high", "medium"]
@@ -151,7 +154,7 @@ def test_analyze_sends_the_document_and_situation_and_sorts_risks(llm, lease):
     assert "not legal advice" in response.disclaimer
 
 
-def test_compare_labels_both_documents_caches_after_the_last_and_sorts(llm, lease):
+def test_compare_labels_both_documents_and_sorts_differences(llm, lease):
     differences = [
         Difference(
             topic=severity,
@@ -166,21 +169,18 @@ def test_compare_labels_both_documents_caches_after_the_last_and_sorts(llm, leas
     llm.result = Comparison(
         perspective="the Tenant", summary="", differences=differences, questions_for_lawyer=[]
     )
-    response = assist(AssistRequest(documents=[lease, "Rent is £950."]), llm)
+    response = run(AssistRequest(documents=[lease, "Rent is £950."]), llm)
 
-    first, second, _ = llm.calls[0]["content"]
-    assert (first["title"], second["title"]) == ("Document A", "Document B")
-    assert "cache_control" not in first
-    assert second["cache_control"] == {"type": "ephemeral"}
+    assert llm.calls[0]["documents"] == {"A": lease, "B": "Rent is £950."}
     assert response.task == "compare"
     assert [difference.severity for difference in response.result.differences] == ["high", "low"]
 
 
 def test_ask_sends_the_question(llm, lease):
     llm.result = answer_with(quote("The deposit is non-refundable."))
-    response = assist(AssistRequest(documents=[lease], question="Do I get my deposit back?"), llm)
+    response = run(AssistRequest(documents=[lease], question="Do I get my deposit back?"), llm)
 
-    assert "Do I get my deposit back?" in llm.calls[0]["content"][-1]["text"]
+    assert "Do I get my deposit back?" in llm.calls[0]["request"]
     assert response.task == "ask"
     assert response.warnings == []
 
@@ -196,7 +196,7 @@ def test_unmatched_quotes_are_blanked_and_reported(llm, analysis, lease):
         )
     )
     llm.result = analysis
-    response = assist(AssistRequest(documents=[lease]), llm)
+    response = run(AssistRequest(documents=[lease]), llm)
 
     invented = next(risk for risk in response.result.risks if risk.title == "Invented")
     assert invented.quotes[0].text == ""
@@ -205,24 +205,24 @@ def test_unmatched_quotes_are_blanked_and_reported(llm, analysis, lease):
 
 def test_non_legal_document_is_flagged(llm, analysis, lease):
     llm.result = analysis.model_copy(update={"is_legal_document": False})
-    response = assist(AssistRequest(documents=[lease]), llm)
+    response = run(AssistRequest(documents=[lease]), llm)
     assert any("doesn't look like a legal document" in warning for warning in response.warnings)
 
 
 @pytest.mark.parametrize(("support", "flagged"), [("yes", True), ("partly", True), ("no", False)])
 def test_answer_claiming_support_without_quotes_is_flagged(llm, lease, support, flagged):
     llm.result = Answer(answer="...", supported_by_document=support, quotes=[], caveats=[])
-    response = assist(AssistRequest(documents=[lease], question="Can I keep a pet?"), llm)
+    response = run(AssistRequest(documents=[lease], question="Can I keep a pet?"), llm)
     assert any("cites no passage" in warning for warning in response.warnings) == flagged
 
 
 def test_unmatched_answer_quote_is_reported_once(llm, lease):
     llm.result = answer_with(quote("You may keep a pet."))
-    response = assist(AssistRequest(documents=[lease], question="Can I keep a pet?"), llm)
+    response = run(AssistRequest(documents=[lease], question="Can I keep a pet?"), llm)
     assert len(response.warnings) == 1
 
 
 def test_llm_errors_propagate(llm, lease):
     llm.error = LLMError("unavailable")
     with pytest.raises(LLMError):
-        assist(AssistRequest(documents=[lease]), llm)
+        run(AssistRequest(documents=[lease]), llm)

@@ -6,7 +6,7 @@ and which warnings the user sees. The model is only asked for language understan
 """
 
 import unicodedata
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from pydantic import BaseModel
 
@@ -49,19 +49,21 @@ def resolve_task(request: AssistRequest) -> Task:
     return "analyze"
 
 
-def assist(request: AssistRequest, llm: LLMClient) -> AssistResponse:
+async def assist(request: AssistRequest, llm: LLMClient) -> AssistResponse:
     """Run the resolved task and return a result whose quotes are verified against the source.
 
     Raises:
         LLMError: the model call failed; the error carries a user-facing message.
     """
     task = resolve_task(request)
-    result = llm.complete(
+    documents = dict(zip(_LABELS, request.documents, strict=False))
+    result = await llm.complete(
         system=SYSTEM_PROMPT,
-        content=_build_content(request, task),
+        documents=documents,
+        request=user_instruction(task, question=request.question, context=request.context),
         output_model=_OUTPUT_MODELS[task],
     )
-    unmatched = verify_quotes(result, dict(zip(_LABELS, request.documents, strict=False)))
+    unmatched = verify_quotes(result, documents)
     if isinstance(result, Analysis):
         result.risks.sort(key=lambda risk: _SEVERITY_ORDER[risk.severity])
     elif isinstance(result, Comparison):
@@ -72,27 +74,6 @@ def assist(request: AssistRequest, llm: LLMClient) -> AssistResponse:
         warnings=_warnings(result, unmatched),
         disclaimer=DISCLAIMER,
     )
-
-
-def _build_content(request: AssistRequest, task: Task) -> list[dict[str, Any]]:
-    blocks: list[dict[str, Any]] = [
-        {
-            "type": "document",
-            "source": {"type": "text", "media_type": "text/plain", "data": text},
-            "title": f"Document {label}",
-        }
-        for label, text in zip(_LABELS, request.documents, strict=False)
-    ]
-    # One cache breakpoint after the documents caches system prompt + schema + documents, so
-    # repeated questions about the same document are cheaper and faster.
-    blocks[-1]["cache_control"] = {"type": "ephemeral"}
-    blocks.append(
-        {
-            "type": "text",
-            "text": user_instruction(task, question=request.question, context=request.context),
-        }
-    )
-    return blocks
 
 
 def _warnings(result: BaseModel, unmatched: int) -> list[str]:

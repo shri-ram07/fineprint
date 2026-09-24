@@ -17,7 +17,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .assistant import assist
 from .documents import DocumentError, DocumentKind, extract_text
-from .llm import AnthropicLLM, LLMClient, LLMError
+from .llm import GeminiLLM, LLMClient, LLMError
 from .schemas import AssistRequest, AssistResponse
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ SECURITY_HEADERS = {
 def create_app(llm: LLMClient | None = None) -> FastAPI:
     """Build the app. Without an injected client, credentials are checked here, at startup."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    llm = llm or AnthropicLLM.from_env()
+    llm = llm or GeminiLLM.from_env()
 
     # The interactive API docs load scripts from a CDN, which the CSP forbids; the README
     # documents the API endpoints instead.
@@ -92,12 +92,10 @@ def create_app(llm: LLMClient | None = None) -> FastAPI:
         logger.info("Extracted %d characters from a %s upload", len(text), kind)
         return {"text": text}
 
-    # A plain `def` so FastAPI runs it in a worker thread: the model call is synchronous and
-    # can take minutes, and must not block the event loop.
     @app.post("/api/assist")
-    def run_assistant(request: AssistRequest) -> AssistResponse:
+    async def run_assistant(request: AssistRequest) -> AssistResponse:
         started = time.perf_counter()
-        response = assist(request, llm)
+        response = await assist(request, llm)
         logger.info(
             "task=%s documents=%s warnings=%d duration=%.1fs",
             response.task,

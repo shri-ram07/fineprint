@@ -13,15 +13,24 @@ LEASE = """\
 
 
 class FakeLLM:
-    """Stands in for the Anthropic API: returns a canned result or raises, and records calls."""
+    """Stands in for the model: returns a canned result or raises, and records each call."""
 
     def __init__(self, result: BaseModel) -> None:
         self.result = result
         self.error: Exception | None = None
         self.calls: list[dict[str, Any]] = []
 
-    def complete(self, *, system: str, content: list[dict[str, Any]], output_model: type) -> Any:
-        self.calls.append({"system": system, "content": content, "output_model": output_model})
+    async def complete(
+        self, *, system: str, documents: dict[str, str], request: str, output_model: type
+    ) -> Any:
+        self.calls.append(
+            {
+                "system": system,
+                "documents": documents,
+                "request": request,
+                "output_model": output_model,
+            }
+        )
         if self.error:
             raise self.error
         assert isinstance(self.result, output_model), "the assistant asked for the wrong schema"

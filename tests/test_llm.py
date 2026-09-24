@@ -1,13 +1,14 @@
+"""The Gemini adapter, run through real ADK with only the network call replaced."""
+
+import asyncio
 import json
 import logging
-from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
-import anthropic
-import httpx2
 import pytest
+from google.genai import Client, errors, types
 
-from fineprint.llm import AnthropicLLM, LLMError
+from fineprint.llm import GeminiLLM, LLMError
 from fineprint.schemas import Answer
 
 VALID_ANSWER = json.dumps(
@@ -15,25 +16,42 @@ VALID_ANSWER = json.dumps(
 )
 
 
-def fake_client(stop_reason: str = "end_turn", text: str = VALID_ANSWER) -> MagicMock:
-    """An Anthropic client whose streamed response is fixed (MagicMock credentials are truthy)."""
-    client = MagicMock()
-    stream = client.messages.stream.return_value.__enter__.return_value
-    stream.request_id = "req_test"
-    stream.get_final_message.return_value = SimpleNamespace(
-        stop_reason=stop_reason,
-        content=[
-            SimpleNamespace(type="thinking", thinking=""),
-            SimpleNamespace(type="text", text=text),
+def gemini_response(text: str = VALID_ANSWER, finish=types.FinishReason.STOP):
+    return types.GenerateContentResponse(
+        candidates=[
+            types.Candidate(
+                content=types.Content(
+                    role="model",
+                    parts=[types.Part(text="thinking...", thought=True), types.Part(text=text)],
+                ),
+                finish_reason=finish,
+            )
         ],
-        usage=SimpleNamespace(input_tokens=10, output_tokens=5, cache_read_input_tokens=None),
+        usage_metadata=types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=10, candidates_token_count=5
+        ),
+    )
+
+
+def fake_client(result=None) -> Client:
+    """A real genai Client whose only network call is replaced by a stub."""
+    client = Client(api_key="test-key")
+    client.aio.models.generate_content = AsyncMock(
+        side_effect=result if isinstance(result, Exception) else None,
+        return_value=result or gemini_response(),
     )
     return client
 
 
-def complete(client: MagicMock) -> Answer:
-    return AnthropicLLM("test-model", client).complete(
-        system="system prompt", content=[{"type": "text", "text": "hi"}], output_model=Answer
+def complete(client: Client) -> Answer:
+    llm = GeminiLLM("test-model", client)
+    return asyncio.run(
+        llm.complete(
+            system="system prompt",
+            documents={"A": "Rent is £900.", "B": "Rent is £950."},
+            request="Which rent is higher?",
+            output_model=Answer,
+        )
     )
 
 
@@ -41,80 +59,93 @@ def test_valid_output_is_parsed_and_request_is_shaped_for_structured_output():
     client = fake_client()
     assert complete(client).answer == "Yes."
 
-    request = client.messages.stream.call_args.kwargs
+    request = client.aio.models.generate_content.call_args.kwargs
     assert request["model"] == "test-model"
-    assert request["system"] == "system prompt"
-    assert request["messages"] == [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
-    assert request["output_config"]["format"]["type"] == "json_schema"
-    assert request["output_config"]["format"]["schema"]["title"] == "Answer"
+    assert request["config"].system_instruction is not None
+    assert "system prompt" in str(request["config"].system_instruction)
+    assert request["config"].response_schema is Answer
+    assert request["config"].max_output_tokens == 32_000
+    texts = [part.text for part in request["contents"][-1].parts]
+    assert texts[0] == '<document id="A">\nRent is £900.\n</document>'
+    assert texts[1] == '<document id="B">\nRent is £950.\n</document>'
+    assert texts[-1] == "Which rent is higher?"
 
 
 @pytest.mark.parametrize(
-    ("stop_reason", "code"),
-    # Valid JSON on purpose: a truncated or refused response must never be trusted.
-    [("max_tokens", "truncated"), ("refusal", "declined")],
+    ("finish", "code"),
+    # Valid JSON on purpose: a truncated or blocked response must never be trusted.
+    [(types.FinishReason.MAX_TOKENS, "truncated"), (types.FinishReason.SAFETY, "declined")],
 )
-def test_stop_reason_is_checked_before_the_output(stop_reason, code):
+def test_finish_reason_is_checked_before_the_output(finish, code):
     with pytest.raises(LLMError) as raised:
-        complete(fake_client(stop_reason=stop_reason))
+        complete(fake_client(gemini_response(finish=finish)))
     assert raised.value.code == code
 
 
-def test_invalid_output_is_malformed_and_not_logged(caplog):
-    caplog.set_level(logging.DEBUG)
+def test_blocked_prompt_is_declined():
+    blocked = types.GenerateContentResponse(
+        prompt_feedback=types.GenerateContentResponsePromptFeedback(
+            block_reason=types.BlockedReason.SAFETY
+        )
+    )
     with pytest.raises(LLMError) as raised:
-        complete(fake_client(text='{"answer": "SECRET-CLAUSE-TEXT"}'))
+        complete(fake_client(blocked))
+    assert raised.value.code == "declined"
+
+
+def test_invalid_output_is_malformed_and_not_logged(caplog):
+    caplog.set_level(logging.INFO)
+    with pytest.raises(LLMError) as raised:
+        complete(fake_client(gemini_response('{"answer": "SECRET-CLAUSE-TEXT"}')))
     assert raised.value.code == "malformed"
     assert "SECRET-CLAUSE-TEXT" not in caplog.text
 
 
+def api_error(code: int, status: str, reason: str = "") -> errors.APIError:
+    body = {"error": {"code": code, "status": status, "message": "upstream detail"}}
+    if reason:
+        body["error"]["details"] = [{"reason": reason}]
+    return (errors.ServerError if code >= 500 else errors.ClientError)(code, body)
+
+
 @pytest.mark.parametrize(
-    ("status", "code"),
+    ("error", "code"),
     [
-        (401, "configuration"),
-        (402, "configuration"),
-        (404, "configuration"),
-        (429, "unavailable"),
-        (529, "unavailable"),
-        (400, "malformed"),
-        (200, "unavailable"),  # error event mid-stream, e.g. overloaded_error
+        (api_error(400, "INVALID_ARGUMENT", "API_KEY_INVALID"), "configuration"),
+        (api_error(403, "PERMISSION_DENIED"), "configuration"),
+        (api_error(404, "NOT_FOUND"), "configuration"),
+        (api_error(429, "RESOURCE_EXHAUSTED"), "unavailable"),
+        (api_error(503, "UNAVAILABLE"), "unavailable"),
+        (api_error(400, "INVALID_ARGUMENT"), "malformed"),
+        (ConnectionError("refused"), "unavailable"),
+    ],
+    ids=[
+        "bad-key",
+        "forbidden",
+        "unknown-model",
+        "rate-limited",
+        "overloaded",
+        "bad-request",
+        "offline",
     ],
 )
-def test_api_errors_map_to_user_facing_codes(status, code):
-    client = fake_client()
-    response = httpx2.Response(status, request=httpx2.Request("POST", "https://api.test"))
-    client.messages.stream.side_effect = anthropic.APIStatusError(
-        "upstream detail", response=response, body=None
-    )
+def test_api_errors_map_to_user_facing_codes(error, code):
     with pytest.raises(LLMError) as raised:
-        complete(client)
+        complete(fake_client(error))
     assert raised.value.code == code
     assert "upstream detail" not in raised.value.message
 
 
-def test_connection_failure_is_unavailable():
-    client = fake_client()
-    client.messages.stream.side_effect = anthropic.APIConnectionError(
-        request=httpx2.Request("POST", "https://api.test")
-    )
+def test_missing_api_key_fails_at_construction(monkeypatch):
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with pytest.raises(LLMError) as raised:
-        complete(client)
-    assert raised.value.code == "unavailable"
-
-
-@pytest.mark.parametrize(
-    "credentials",
-    [{"api_key": "k"}, {"auth_token": "t"}, {"credentials": object()}],
-    ids=["api-key", "auth-token", "ant-login-profile"],
-)
-def test_any_credential_source_is_accepted(credentials):
-    client = MagicMock(**{"api_key": None, "auth_token": None, "credentials": None, **credentials})
-    AnthropicLLM("test-model", client)
-
-
-def test_missing_credentials_fail_at_construction():
-    client = MagicMock(api_key=None, auth_token=None, credentials=None)
-    with pytest.raises(LLMError) as raised:
-        AnthropicLLM("test-model", client)
+        GeminiLLM("test-model")
     assert raised.value.code == "configuration"
-    assert "ANTHROPIC_API_KEY" in raised.value.message
+    assert "GOOGLE_API_KEY" in raised.value.message
+
+
+def test_api_key_from_environment_is_accepted(monkeypatch):
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    GeminiLLM("test-model")

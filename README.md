@@ -52,8 +52,8 @@ flowchart LR
     UI["Browser<br/>static HTML + JS"] -->|"POST /api/documents/text"| DOC["documents.py<br/>bytes to text"]
     UI -->|"POST /api/assist"| WEB["web.py<br/>limits, headers, errors"]
     WEB --> AST["assistant.py<br/>decision engine"]
-    AST --> LLM["llm.py<br/>Anthropic adapter"]
-    LLM --> API[("Claude API")]
+    AST --> LLM["llm.py<br/>Gemini via Google ADK"]
+    LLM --> API[("Gemini API")]
 ```
 
 | Module | Responsibility |
@@ -62,7 +62,7 @@ flowchart LR
 | `fineprint/schemas.py` | Request, response and model-output shapes. Output models double as the JSON schema sent to the model. |
 | `fineprint/prompts.py` | The system prompt and the per-task instructions. |
 | `fineprint/assistant.py` | Task selection, quote verification, severity ordering, warnings, disclaimer. Pure logic, no I/O. |
-| `fineprint/llm.py` | The only code that talks to the API. Returns a validated object or an `LLMError`. |
+| `fineprint/llm.py` | The only code that talks to the model: Gemini, driven through Google's Agent Development Kit (ADK). Returns a validated object or an `LLMError`. |
 | `fineprint/web.py` | FastAPI app factory: routes, request limits, security headers, error mapping. |
 | `fineprint/static/` | The single-page UI. No framework, no build step. |
 
@@ -81,8 +81,8 @@ Endpoints (the interactive API docs are disabled because the CSP blocks their CD
 Input       documents (1-2), optional question, optional situation
 Validation  pydantic: 1-2 non-blank documents, each <= 300,000 characters; question <= 1,000; situation <= 500
 Decision    question present -> ask; two documents -> compare; otherwise -> analyze        (code)
-Action      one structured-output call: documents as cached document blocks + task instructions
-Checks      stop_reason: refusal -> declined, max_tokens -> truncated                     (code)
+Action      one ADK agent run with a response schema: labelled documents + task instructions
+Checks      finish reason: MAX_TOKENS -> truncated, blocked or any other stop -> declined  (code)
             output must validate against the task's schema, otherwise malformed          (code)
             every quote verified against its named document; unmatched quotes blanked   (code)
             risks and differences sorted high, medium, low                               (code)
@@ -130,7 +130,7 @@ Also included:
 
 - Python 3.11+, [uv](https://docs.astral.sh/uv/)
 - FastAPI (Starlette, uvicorn) for the web layer
-- Anthropic Python SDK. The model defaults to `claude-opus-5`.
+- [Google ADK](https://google.github.io/adk-docs/) with Gemini. The model defaults to `gemini-3.5-flash`.
 - pypdf (with `cryptography` for encrypted PDFs); DOCX is parsed with the standard library
 - pytest and ruff
 - Plain HTML, CSS and JavaScript for the UI
@@ -146,7 +146,7 @@ uv sync
 cp .env.example .env
 ```
 
-On Windows, use `copy .env.example .env` for the last step. Then put your Anthropic API key in `.env` and start the app:
+On Windows, use `copy .env.example .env` for the last step. Then put your Gemini API key (from [Google AI Studio](https://aistudio.google.com/apikey)) in `.env` and start the app:
 
 ```bash
 uv run --env-file .env uvicorn --factory fineprint.web:create_app
@@ -158,12 +158,10 @@ Open <http://localhost:8000>. For development, add `--reload`.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
-| `ANTHROPIC_API_KEY` | Yes, unless you use `ant auth login` | none | Credentials for the Claude API |
-| `ANTHROPIC_MODEL` | No | `claude-opus-5` | Model used for all tasks |
+| `GOOGLE_API_KEY` | Yes (`GEMINI_API_KEY` also works) | none | Gemini API key |
+| `GEMINI_MODEL` | No | `gemini-3.5-flash` | Model used for all tasks, e.g. a Pro model for harder documents |
 
-The SDK's standard credential chain applies: `ANTHROPIC_API_KEY`, then
-`ANTHROPIC_AUTH_TOKEN`, then an `ant auth login` profile. If none is found, the app refuses
-to start and says what to do. Size limits are constants: the upload limit in `web.py`, the
+If no key is set, the app refuses to start and says what to do. Size limits are constants: the upload limit in `web.py`, the
 document limit in `documents.py`, and the question and situation limits in `schemas.py`. The UI
 repeats the last two as `maxlength` in `static/index.html` and the upload limit in the 413
 message in `static/app.js`, so change them together.
@@ -198,12 +196,12 @@ DOCX files are built inside the tests, so there are no binary fixtures.
 | File | What it covers |
 |---|---|
 | `test_documents.py` | Encodings (UTF-8, BOM, UTF-16, cp1252), DOCX paragraphs and zip-bomb bound, PDF text, scanned and partly scanned PDFs, encrypted PDFs, corrupt files, size limits |
-| `test_assistant.py` | Task selection, request validation, quote verification (PDF artefacts, altered amounts, empty and wrongly labelled quotes, evidence-free findings), prompt assembly and caching, severity order, warnings |
-| `test_llm.py` | Stop reason checked before parsing, malformed output not logged, HTTP status to error-code mapping, missing credentials |
+| `test_assistant.py` | Task selection, request validation, quote verification (PDF artefacts, altered amounts, empty and wrongly labelled quotes, evidence-free findings), what is sent to the model, severity order, warnings |
+| `test_llm.py` | Runs the real ADK agent with only the network call stubbed: request shape, finish reason checked before parsing, blocked prompts, malformed output not logged, API errors to error codes, missing key |
 | `test_web.py` | Routes, upload handling, 413, host check, security headers, validation errors that never echo the document, model failures as fixed messages |
 
-A manual check needs a real key. Run all three tasks on `samples/`, then ask two
-questions in a row. The second request's log line should show `cache_read_tokens` above 0.
+A manual check needs a real key: run all three tasks on `samples/`. Each model call logs
+one line with its finish reason, token counts (including cached tokens) and duration.
 
 ## Assumptions
 
@@ -214,10 +212,11 @@ questions in a row. The second request's log line should show `cache_read_tokens
 
 ## Trade-offs
 
-- **Quote verification instead of API citations.** The API's citations feature cannot be combined with structured outputs. Matching quotes in code keeps both: typed results and verifiable evidence. The cost is a tolerant matcher that trims edge punctuation from the passages it returns.
-- **Structured output through `output_config`, not the SDK's `output_format` helper.** The helper parses the response before the stop reason is known. Parsing after the check means a truncated or refused response can never be shown as a complete result.
-- **One large-model call per task.** Accuracy matters more than cost here. Prompt caching makes repeated questions on the same document cheaper. The schema is part of the cached prefix, so the first question after an analysis is still a cache write.
-- **No refusal fallback model.** Legal text rarely triggers safety classifiers. A refusal is shown as a clear error instead of being silently retried on another model.
+- **Quote verification in code, not model-reported sources.** The model is asked for verbatim quotes and code checks every one, so the evidence is verified rather than trusted. The cost is a tolerant matcher that trims edge punctuation from the passages it returns.
+- **ADK without `output_key`.** ADK can validate structured output itself, but only after the fact and without saying why generation stopped. FinePrint reads the raw text and checks the finish reason first, so a truncated or blocked response can never be shown as a complete result.
+- **ADK for a single call.** Each request is one single-turn agent run. That is more machinery than calling the Gemini SDK directly, but it keeps the model layer on the framework this project standardises on, and it is where tools or multi-step agents would plug in.
+- **One call per task, Flash by default.** `gemini-3.5-flash` is fast and inexpensive. Set `GEMINI_MODEL` to a Pro model for long or dense contracts. Documents are sent first so that repeated questions on the same document share a prefix that Gemini can cache.
+- **No automatic retry on a blocked response.** Legal text rarely trips safety filters. When it does, the user sees a clear error rather than a silent retry.
 - **Stateless over convenient.** Nothing is stored, so there is nothing to leak or clean up. The cost is that the browser sends the document text with every request.
 
 ## Limitations
