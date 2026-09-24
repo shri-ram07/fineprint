@@ -1,0 +1,38 @@
+FREELANCE SERVICES AGREEMENT (REVISED DRAFT)
+
+This Agreement is made on 1 October 2026 between Northwind Digital Ltd ("the Client") and Alex Morgan ("the Contractor").
+
+1. Definitions
+1.1 "Deliverables" means the work product created by the Contractor specifically for the Client under this Agreement. It does not include materials the Contractor owned before this Agreement.
+1.2 "Fees" means GBP 12,000, payable in three equal milestones.
+
+2. Services
+2.1 The Contractor will design and build the Client's customer website as described in the project brief.
+2.2 Changes to the scope of the Services must be agreed in writing by both parties, including any change to the Fees.
+
+3. Payment
+3.1 The Client will pay the Fees within thirty (30) days of receiving a valid invoice.
+3.2 Late payments carry interest at 4% per year above the Bank of England base rate.
+
+4. Intellectual Property
+4.1 Rights in the Deliverables pass to the Client once the Fees for them have been paid in full.
+4.2 The Contractor keeps ownership of pre-existing materials and grants the Client a non-exclusive licence to use them as part of the Deliverables.
+4.3 The Contractor may show the Deliverables in a portfolio after the website launches.
+
+5. Confidentiality
+5.1 The Contractor must keep the Client's information confidential during this Agreement and for three (3) years afterwards.
+
+6. Non-Solicitation
+6.1 For six (6) months after this Agreement ends, the Contractor will not directly solicit the Client's customers that the Contractor worked with.
+
+7. Liability
+7.1 Each party's total liability under this Agreement is limited to the Fees paid in the twelve months before the claim.
+
+8. Term and Termination
+8.1 This Agreement lasts until the Services are completed.
+8.2 Either party may terminate this Agreement on thirty (30) days' written notice.
+8.3 On termination the Client will pay for all work performed up to the termination date.
+
+9. Disputes
+9.1 The parties will try to resolve any dispute by negotiation before starting court proceedings.
+9.2 This Agreement is governed by the laws of England and Wales.

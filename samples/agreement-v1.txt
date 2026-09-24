@@ -1,0 +1,42 @@
+FREELANCE SERVICES AGREEMENT
+
+This Agreement is made on 1 October 2026 between Northwind Digital Ltd ("the Client") and Alex Morgan ("the Contractor").
+
+1. Definitions
+1.1 "Deliverables" means all work product created by the Contractor under this Agreement, including drafts, source files and any materials the Contractor owned before this Agreement that are used in the work.
+1.2 "Fees" means the amounts set out in Schedule A.
+
+2. Services
+2.1 The Contractor will design and build the Client's customer website as described in the project brief.
+2.2 The Client may change the scope of the Services at any time by written notice. The Fees will not change unless the Client agrees otherwise in writing.
+
+3. Payment
+3.1 The Client will pay the Fees within ninety (90) days of receiving a valid invoice.
+3.2 The Client may withhold any payment if it is not satisfied with the Deliverables.
+3.3 Invoices must be submitted within 14 days of completing a milestone; late invoices will not be paid.
+
+4. Intellectual Property
+4.1 All rights in the Deliverables, including any pre-existing materials of the Contractor used in them, are assigned to the Client on creation.
+4.2 The Contractor may not show the Deliverables in a portfolio without the Client's prior written consent.
+
+5. Confidentiality
+5.1 The Contractor must keep the Client's information confidential during this Agreement and for an unlimited period afterwards.
+
+6. Non-Competition
+6.1 For twenty-four (24) months after this Agreement ends, the Contractor will not provide services to any business that competes with the Client anywhere in the world.
+
+7. Liability
+7.1 The Contractor is liable for all losses suffered by the Client arising from the Services, without limit.
+7.2 The Contractor will indemnify the Client against any claim by a third party relating to the Deliverables.
+
+8. Term and Termination
+8.1 This Agreement lasts for twelve (12) months and renews automatically for further twelve-month periods unless either party gives notice.
+8.2 The Client may terminate this Agreement at any time with immediate effect. The Contractor may terminate on ninety (90) days' written notice.
+8.3 On termination the Client will pay only for Deliverables it has accepted.
+
+9. Changes to this Agreement
+9.1 The Client may update these terms by posting a new version on its supplier portal. Continued work by the Contractor means acceptance.
+
+10. Disputes
+10.1 Any dispute will be resolved by binding arbitration in London. The Contractor waives any right to bring or join a class or collective action.
+10.2 This Agreement is governed by the laws of England and Wales.
