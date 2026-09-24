@@ -36,7 +36,8 @@ term.
 _PERSPECTIVE = (
     "Write for the party the user says they are. If they did not say, write for the "
     "individual or less powerful party (for example the tenant, employee, freelancer or "
-    "consumer) and name that party in `perspective`."
+    "consumer) and name that party in `perspective`. If the user mentions a deadline, "
+    "order `next_steps` so they fit it."
 )
 
 _SEVERITY = (
@@ -58,8 +59,9 @@ class-action waivers and governing law; one-sided rights to change the terms; as
 Each of these that is present belongs in `risks` or `key_terms`; each that would normally \
 appear in this kind of document but is absent belongs in `missing_or_unclear`. Clauses that \
 contradict each other belong in `inconsistencies` (and in `risks` if they matter). A schedule, \
-exhibit or annex that is referred to but not included belongs in `missing_or_unclear`. Give \
-each obligation its deadline or trigger in `when`.
+exhibit or annex that is referred to but not included belongs in `missing_or_unclear`, as do \
+undefined notice periods, undefined acceptance criteria and standards left to one party's \
+discretion. Give each obligation its deadline or trigger in `when`.
 
 {_SEVERITY}
 
@@ -81,8 +83,9 @@ or two competing offers.
 {_PERSPECTIVE}
 
 List each meaningful difference by topic. When a topic appears in only one document, write \
-"Not addressed" for the other. Explain in `impact` what the difference means for the user \
-and quote the relevant passage from each document. Ignore wording changes that do not \
+"Not addressed" for the other. Explain in `impact` what the difference means for the user, \
+say in `better_for_you` which version serves them better, and quote the relevant passage \
+from each document. Ignore wording changes that do not \
 change the meaning.
 
 {_SEVERITY}

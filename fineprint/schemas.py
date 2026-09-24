@@ -83,6 +83,9 @@ class Difference(BaseModel):
     document_a: str = Field(description="What Document A says, or 'Not addressed'.")
     document_b: str = Field(description="What Document B says, or 'Not addressed'.")
     impact: str = Field(description="What the difference means for the reader.")
+    better_for_you: Literal["A", "B", "neither"] = Field(
+        description="Which version serves the reader better on this topic."
+    )
     severity: Severity
     quotes: list[Quote]
 

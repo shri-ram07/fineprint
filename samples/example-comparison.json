@@ -1,0 +1,216 @@
+{
+  "task": "compare",
+  "result": {
+    "perspective": "the Contractor",
+    "is_legal_document": true,
+    "summary": "Document A heavily favors the Client by giving them unlimited liability, ownership of your pre-existing work, the power to change scope or terms unilaterally, and a strict global non-compete clause. Document B is a balanced freelance agreement that protects your pre-existing work, caps your liability, provides clearer payment terms, and replaces the non-compete with a limited non-solicitation clause.",
+    "differences": [
+      {
+        "topic": "Definition of Deliverables",
+        "document_a": "Includes drafts, source files and any materials the Contractor owned before this Agreement that are used in the work.",
+        "document_b": "Excludes materials the Contractor owned before this Agreement.",
+        "impact": "Document A gives away ownership of your pre-existing tools and background materials to the client. Document B ensures you keep your pre-existing materials.",
+        "better_for_you": "B",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "including drafts, source files and any materials the Contractor owned before this Agreement that are used in the work"
+          },
+          {
+            "document": "B",
+            "text": "It does not include materials the Contractor owned before this Agreement"
+          }
+        ]
+      },
+      {
+        "topic": "Fees and Scope Changes",
+        "document_a": "Fees are set out in Schedule A. The Client may change the scope at any time without changing the Fees unless agreed in writing.",
+        "document_b": "Fees are GBP 12,000, payable in three equal milestones. Changes to scope must be agreed in writing by both parties, including any change to the Fees.",
+        "impact": "Document A allows the client to force extra work on you without increasing pay. Document B specifies a fixed fee and requires mutual agreement for scope and fee changes.",
+        "better_for_you": "B",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Client may change the scope of the Services at any time by written notice. The Fees will not change unless the Client agrees otherwise in writing"
+          },
+          {
+            "document": "B",
+            "text": "Changes to the scope of the Services must be agreed in writing by both parties, including any change to the Fees"
+          }
+        ]
+      },
+      {
+        "topic": "Payment Terms and Deadlines",
+        "document_a": "Invoices must be submitted within 14 days of completing a milestone; late invoices will not be paid. Payment is due within 90 days (or 30 days depending on conflicting clauses), and the Client may withhold payment if dissatisfied.",
+        "document_b": "The Client will pay the Fees within thirty (30) days of receiving a valid invoice, with interest added for late payments.",
+        "impact": "Document A contains contradictory payment timelines (90 days vs 30 days), forfeits payment entirely if you submit an invoice late, and allows the client to withhold money if they are unsatisfied. Document B gives a clear 30-day window and adds late payment interest.",
+        "better_for_you": "B",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "Invoices must be submitted within 14 days of completing a milestone; late invoices will not be paid"
+          },
+          {
+            "document": "B",
+            "text": "The Client will pay the Fees within thirty (30) days of receiving a valid invoice"
+          }
+        ]
+      },
+      {
+        "topic": "Intellectual Property Ownership",
+        "document_a": "All rights in the Deliverables, including any pre-existing materials of the Contractor used in them, are assigned to the Client on creation.",
+        "document_b": "Rights in the Deliverables pass to the Client once the Fees for them have been paid in full.",
+        "impact": "Document A transfers your rights immediately upon creation before you are paid. Document B ensures you retain rights until you receive full payment.",
+        "better_for_you": "B",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "All rights in the Deliverables, including any pre-existing materials of the Contractor used in them, are assigned to the Client on creation"
+          },
+          {
+            "document": "B",
+            "text": "Rights in the Deliverables pass to the Client once the Fees for them have been paid in full"
+          }
+        ]
+      },
+      {
+        "topic": "Restrictive Covenants",
+        "document_a": "For twenty-four (24) months after this Agreement ends, the Contractor will not provide services to any business that competes with the Client anywhere in the world.",
+        "document_b": "For six (6) months after this Agreement ends, the Contractor will not directly solicit the Client's customers that the Contractor worked with.",
+        "impact": "Document A is a severe global non-compete preventing you from working with any competitor for two years. Document B is a much milder non-solicitation restriction lasting only six months for specific clients.",
+        "better_for_you": "B",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "For twenty-four (24) months after this Agreement ends, the Contractor will not provide services to any business that competes with the Client anywhere in the world"
+          },
+          {
+            "document": "B",
+            "text": "For six (6) months after this Agreement ends, the Contractor will not directly solicit the Client's customers that the Contractor worked with"
+          }
+        ]
+      },
+      {
+        "topic": "Liability and Indemnity",
+        "document_a": "The Contractor is liable for all losses suffered by the Client arising from the Services, without limit, and must indemnify the Client against third-party claims.",
+        "document_b": "Each party's total liability under this Agreement is limited to the Fees paid in the twelve months before the claim.",
+        "impact": "Document A exposes you to unlimited financial ruin and third-party claims. Document B caps your total liability at the amount of fees paid over twelve months.",
+        "better_for_you": "B",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Contractor is liable for all losses suffered by the Client arising from the Services, without limit"
+          },
+          {
+            "document": "B",
+            "text": "Each party's total liability under this Agreement is limited to the Fees paid in the twelve months before the claim"
+          }
+        ]
+      },
+      {
+        "topic": "Termination Terms",
+        "document_a": "The Client may terminate at any time with immediate effect, while the Contractor needs 90 days' notice. On termination the Client pays only for accepted Deliverables.",
+        "document_b": "Either party may terminate on thirty (30) days' written notice. On termination the Client will pay for all work performed up to the termination date.",
+        "impact": "Document A is heavily asymmetrical, allowing the client to fire you instantly and refuse payment for unaccepted work while locking you in for 90 days. Document B provides mutual 30-day termination and ensures payment for all performed work.",
+        "better_for_you": "B",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Client may terminate this Agreement at any time with immediate effect. The Contractor may terminate on ninety (90) days' written notice"
+          },
+          {
+            "document": "B",
+            "text": "Either party may terminate this Agreement on thirty (30) days' written notice"
+          }
+        ]
+      },
+      {
+        "topic": "Unilateral Contract Changes",
+        "document_a": "The Client may update these terms by posting a new version on its supplier portal. Continued work by the Contractor means acceptance.",
+        "document_b": "Not addressed",
+        "impact": "Document A allows the client to secretly alter contract terms simply by updating a webpage. Document B requires both parties to agree to changes.",
+        "better_for_you": "B",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Client may update these terms by posting a new version on its supplier portal. Continued work by the Contractor means acceptance"
+          }
+        ]
+      },
+      {
+        "topic": "Portfolio Rights",
+        "document_a": "The Contractor may not show the Deliverables in a portfolio without the Client's prior written consent.",
+        "document_b": "The Contractor may show the Deliverables in a portfolio after the website launches.",
+        "impact": "Document A blocks you from showing the work in your portfolio unless the client agrees. Document B explicitly allows you to showcase the work after launch.",
+        "better_for_you": "B",
+        "severity": "medium",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Contractor may not show the Deliverables in a portfolio without the Client's prior written consent"
+          },
+          {
+            "document": "B",
+            "text": "The Contractor may show the Deliverables in a portfolio after the website launches"
+          }
+        ]
+      },
+      {
+        "topic": "Confidentiality Duration",
+        "document_a": "The Contractor must keep the Client's information confidential during this Agreement and for an unlimited period afterwards.",
+        "document_b": "The Contractor must keep the Client's information confidential during this Agreement and for three (3) years afterwards.",
+        "impact": "Document A imposes an indefinite confidentiality obligation. Document B limits this burden to a reasonable three-year period.",
+        "better_for_you": "B",
+        "severity": "medium",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Contractor must keep the Client's information confidential during this Agreement and for an unlimited period afterwards"
+          },
+          {
+            "document": "B",
+            "text": "The Contractor must keep the Client's information confidential during this Agreement and for three (3) years afterwards"
+          }
+        ]
+      },
+      {
+        "topic": "Dispute Resolution and Class Action Waiver",
+        "document_a": "Any dispute will be resolved by binding arbitration in London. The Contractor waives any right to bring or join a class or collective action.",
+        "document_b": "The parties will try to resolve any dispute by negotiation before starting court proceedings.",
+        "impact": "Document A forces binding arbitration and strips you of class action rights. Document B allows for standard court proceedings after negotiation.",
+        "better_for_you": "B",
+        "severity": "medium",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "Any dispute will be resolved by binding arbitration in London. The Contractor waives any right to bring or join a class or collective action"
+          },
+          {
+            "document": "B",
+            "text": "The parties will try to resolve any dispute by negotiation before starting court proceedings"
+          }
+        ]
+      }
+    ],
+    "questions_for_lawyer": [
+      "Are the liability caps in Document B sufficient to protect me against potential third-party claims related to the website design?",
+      "Does the non-solicitation clause in Document B leave me enough room to work with other clients in the same industry?",
+      "Does Document B protect my moral rights and ownership over background tools adequately if payment milestones are delayed?"
+    ],
+    "next_steps": [
+      "Refuse Document A entirely because it contains unlimited liability, unilateral term changes, and restrictive non-compete clauses.",
+      "Select Document B as your preferred baseline agreement since it provides mutual termination rights, payment protection, and a liability cap.",
+      "Negotiate with the client to adopt Document B for the final project contract."
+    ]
+  },
+  "warnings": [],
+  "disclaimer": "This is information about the text you provided, not legal advice. It doesn't know your local law, your negotiating position, or anything outside the document, and it can be wrong."
+}

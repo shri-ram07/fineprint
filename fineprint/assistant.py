@@ -82,7 +82,7 @@ class ResultCache:
         return hashlib.sha256(payload.encode()).hexdigest()
 
     def get(self, key: str) -> AssistResponse | None:
-        """The stored response, shared rather than copied: nothing modifies it after `put`."""
+        """The stored response, shared rather than copied: finished responses are never modified."""
         if key not in self._items:
             return None
         self._items.move_to_end(key)
@@ -91,7 +91,7 @@ class ResultCache:
     def put(self, key: str, response: AssistResponse) -> None:
         if self.size <= 0:
             return
-        self._items[key] = response.model_copy(deep=True)
+        self._items[key] = response
         self._items.move_to_end(key)
         if len(self._items) > self.size:
             self._items.popitem(last=False)
@@ -132,22 +132,26 @@ async def _run(request: AssistRequest, llm: LLMClient) -> AssistResponse:
     result = await llm.complete(
         system=SYSTEM_PROMPT,
         documents=documents,
-        request=user_instruction(task, question=request.question, context=request.context),
+        instruction=user_instruction(task, question=request.question, context=request.context),
         output_model=_OUTPUT_MODELS[task],
         effort=_EFFORT[task],
     )
     # Matching is CPU work on up to 300k characters per document: keep it off the event loop.
     unmatched = await asyncio.to_thread(verify_quotes, result, documents)
     if isinstance(result, Analysis):
-        result.risks.sort(key=lambda risk: _SEVERITY_ORDER[risk.severity])
+        result.risks.sort(key=_by_severity)
     elif isinstance(result, Comparison):
-        result.differences.sort(key=lambda difference: _SEVERITY_ORDER[difference.severity])
+        result.differences.sort(key=_by_severity)
     return AssistResponse(
         task=task,
         result=result,
         warnings=_warnings(result, unmatched),
         disclaimer=DISCLAIMER,
     )
+
+
+def _by_severity(finding: Risk | Difference) -> int:
+    return _SEVERITY_ORDER[finding.severity]
 
 
 def _warnings(result: Result, unmatched: int) -> list[str]:
@@ -214,7 +218,7 @@ def _source(text: str) -> _Source:
     return _Source(text, *_fingerprint(text))
 
 
-def verify_quotes(result: BaseModel, documents: dict[str, str]) -> int:
+def verify_quotes(result: Result, documents: dict[str, str]) -> int:
     """Check every quote against the document it claims to come from.
 
     A found quote is replaced by the exact source passage (from its first to its last matched
@@ -247,7 +251,7 @@ def _match(quote: Quote, sources: dict[str, _Source]) -> bool:
     source = sources.get(quote.document)
     # An empty needle would "match" at position 0 and turn the quote into the whole document.
     position = source.fingerprint.find(needle) if needle and source else -1
-    if position < 0:
+    if source is None or position < 0:
         quote.text = ""
         return False
     start = source.positions[position]

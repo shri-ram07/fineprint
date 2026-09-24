@@ -1,0 +1,25 @@
+{
+  "task": "ask",
+  "result": {
+    "answer": "Payment terms appear contradictory in the agreement. Section 3.1 states that the Client will pay within ninety days of receiving an invoice, but Section 3.4 states that each invoice is payable within thirty days of receipt.",
+    "supported_by_document": "partly",
+    "quotes": [
+      {
+        "document": "A",
+        "text": "The Client will pay the Fees within ninety (90) days of receiving a valid invoice"
+      },
+      {
+        "document": "A",
+        "text": "Each invoice is payable within thirty (30) days of receipt"
+      }
+    ],
+    "caveats": [
+      "Section 3.1 specifies 90 days while Section 3.4 specifies 30 days.",
+      "The Client may withhold payment if it is not satisfied with the Deliverables.",
+      "Invoices must be submitted within 14 days of completing a milestone, and late invoices will not be paid."
+    ],
+    "next_step": "Ask a lawyer to clarify whether the 30-day or 90-day payment term applies."
+  },
+  "warnings": [],
+  "disclaimer": "This is information about the text you provided, not legal advice. It doesn't know your local law, your negotiating position, or anything outside the document, and it can be wrong."
+}

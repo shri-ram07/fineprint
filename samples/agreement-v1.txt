@@ -14,6 +14,7 @@ This Agreement is made on 1 October 2026 between Northwind Digital Ltd ("the Cli
 3.1 The Client will pay the Fees within ninety (90) days of receiving a valid invoice.
 3.2 The Client may withhold any payment if it is not satisfied with the Deliverables.
 3.3 Invoices must be submitted within 14 days of completing a milestone; late invoices will not be paid.
+3.4 Each invoice is payable within thirty (30) days of receipt.
 
 4. Intellectual Property
 4.1 All rights in the Deliverables, including any pre-existing materials of the Contractor used in them, are assigned to the Client on creation.

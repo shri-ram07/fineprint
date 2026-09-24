@@ -12,6 +12,7 @@ from fineprint.schemas import (
     AssistResponse,
     Comparison,
     Difference,
+    DocumentLabel,
     Quote,
     Risk,
 )
@@ -27,7 +28,7 @@ def run(request: AssistRequest, llm: LLMClient, cache: ResultCache | None = None
     return asyncio.run(assist(request, llm, cache or ResultCache(size=0)))
 
 
-def quote(text: str, document: str = "A") -> Quote:
+def quote(text: str, document: DocumentLabel = "A") -> Quote:
     return Quote(document=document, text=text)
 
 
@@ -150,6 +151,7 @@ def test_differences_without_any_quote_count_as_unmatched():
             document_a="30 days",
             document_b="60 days",
             impact="",
+            better_for_you="A",
             severity="high",
             quotes=[],
         )
@@ -162,8 +164,8 @@ def test_analyze_sends_the_document_and_situation_and_sorts_risks(llm, lease):
 
     call = llm.calls[0]
     assert call["documents"] == {"A": lease}
-    assert "I'm the tenant" in call["request"]
-    assert "Analyse Document A" in call["request"]
+    assert "I'm the tenant" in call["instruction"]
+    assert "Analyse Document A" in call["instruction"]
 
     assert response.task == "analyze"
     assert [risk.severity for risk in response.result.risks] == ["high", "medium"]
@@ -178,6 +180,7 @@ def test_compare_labels_both_documents_and_sorts_differences(llm, lease):
             document_a="",
             document_b="",
             impact="",
+            better_for_you="neither",
             severity=severity,
             quotes=[quote("The deposit is non-refundable.")],
         )
@@ -195,7 +198,7 @@ def test_ask_sends_the_question(llm, lease):
     llm.result = answer_with(quote("The deposit is non-refundable."))
     response = run(AssistRequest(documents=[lease], question="Do I get my deposit back?"), llm)
 
-    assert "Do I get my deposit back?" in llm.calls[0]["request"]
+    assert "Do I get my deposit back?" in llm.calls[0]["instruction"]
     assert response.task == "ask"
     assert response.warnings == []
 
@@ -266,21 +269,15 @@ def test_cache_answers_identical_requests_without_the_model(llm, lease):
     assert len(llm.calls) == 2  # a different situation is a different answer
 
 
-def test_cache_stores_a_copy_and_evicts_the_oldest(analysis, lease):
-    cache = ResultCache(size=1)
+def test_cache_evicts_the_least_recently_used(analysis):
+    cache = ResultCache(size=2)
     response = AssistResponse(task="analyze", result=analysis, warnings=[], disclaimer="")
-    cache.put("key", response)
-    response.result.summary = "changed after storing"
-    assert cache.get("key").result.summary != "changed after storing"
-
-
-def test_cache_evicts_the_least_recently_used(llm, lease):
-    cache = ResultCache(size=1)
-    run(AssistRequest(documents=[lease]), llm, cache)
-
-    run(AssistRequest(documents=[lease], context="new"), llm, cache)  # evicts the first entry
-    run(AssistRequest(documents=[lease]), llm, cache)
-    assert len(llm.calls) == 3
+    cache.put("a", response)
+    cache.put("b", response)
+    assert cache.get("a") is response  # reading "a" makes "b" the least recently used
+    cache.put("c", response)
+    assert cache.get("a") is response
+    assert cache.get("b") is None
 
 
 def test_failures_are_not_cached(llm, lease):
