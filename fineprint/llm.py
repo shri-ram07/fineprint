@@ -10,6 +10,7 @@ import re
 import time
 from typing import Literal, Protocol, TypeVar
 
+import httpx
 from google.adk.agents import LlmAgent
 from google.adk.events import Event
 from google.adk.models import Gemini
@@ -49,8 +50,8 @@ NO_CREDENTIALS = (
 
 _APP = "fineprint"
 _USER = "local"
-# Any casing or spacing of a closing document tag inside the document text itself.
-_CLOSING_TAG = re.compile(r"<(\s*)/(\s*)document", re.IGNORECASE)
+# A document tag (opening or closing, any casing or spacing) inside the document text itself.
+_DOCUMENT_TAG = re.compile(r"<(?=\s*/?\s*document)", re.IGNORECASE)
 
 
 class LLMError(Exception):
@@ -68,13 +69,13 @@ class LLMClient(Protocol):
         *,
         system: str,
         documents: dict[str, str],
-        request: str,
+        instruction: str,
         output_model: type[T],
         effort: Effort = "default",
     ) -> T:
         """Return the model's answer validated as `output_model`, or raise `LLMError`.
 
-        `documents` maps a label ("A", "B") to the document text; `request` is the task.
+        `documents` maps a label ("A", "B") to the document text; `instruction` is the task.
         `effort="low"` asks for less reasoning, for simple lookups.
         """
         ...
@@ -90,9 +91,9 @@ def _code_for_error(exc: errors.APIError) -> LLMErrorCode:
 
 
 def _wrap_document(label: str, text: str) -> str:
-    # A document must not be able to close its own tag and add text that reads as ours.
-    # Quote matching ignores the extra backslash, so verification is unaffected.
-    safe = _CLOSING_TAG.sub(r"<\1\\/\2document", text)
+    # A document must not be able to close its own tag, or open a fake second document, and
+    # add text that reads as ours. Quote matching ignores the added backslash.
+    safe = _DOCUMENT_TAG.sub(r"<\\", text)
     return f'<document id="{label}">\n{safe}\n</document>'
 
 
@@ -150,14 +151,14 @@ class GeminiLLM:
         *,
         system: str,
         documents: dict[str, str],
-        request: str,
+        instruction: str,
         output_model: type[T],
         effort: Effort = "default",
     ) -> T:
         # Documents go first so repeated questions about the same document share a prefix,
         # which Gemini caches implicitly.
         parts = [types.Part(text=_wrap_document(label, text)) for label, text in documents.items()]
-        parts.append(types.Part(text=request))
+        parts.append(types.Part(text=instruction))
         started = time.perf_counter()
         final = await self._run(self._runner(system, output_model, effort), parts)
         self._log_usage(final, effort, time.perf_counter() - started)
@@ -179,7 +180,7 @@ class GeminiLLM:
         except errors.APIError as exc:
             logger.error("Gemini API error %s %s: %s", exc.code, exc.status, exc.message)
             raise LLMError(_code_for_error(exc)) from None
-        except OSError as exc:  # connection failures and timeouts
+        except (OSError, httpx.TransportError) as exc:  # connection failures and timeouts
             logger.error("Gemini API unreachable: %s", type(exc).__name__)
             raise LLMError("unavailable") from None
         finally:

@@ -25,10 +25,11 @@ jobs:
       - run: uv sync --locked --extra dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run mypy
       - name: Tests with a coverage floor
         run: uv run --with coverage==7.* coverage run -m pytest -q && uv run --with coverage==7.* coverage report
       - name: Frontend helper tests
-        run: node --test tests/js/helpers.test.mjs
+        run: node --test "tests/js/*.test.mjs"
       - name: Audit runtime dependencies for known vulnerabilities
         run: |
           uv export --no-dev --no-emit-project --format requirements-txt -o requirements.txt

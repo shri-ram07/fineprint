@@ -1,13 +1,10 @@
 import asyncio
-from typing import TypeVar
 
 import pytest
 from pydantic import BaseModel
 
-from fineprint.llm import Effort
+from fineprint.llm import Effort, T
 from fineprint.schemas import Analysis, KeyTerm, Obligation, Quote, Risk
-
-T = TypeVar("T", bound=BaseModel)
 
 LEASE = """\
 1. Rent. The Tenant shall pay £900 per month on the first day of each month.
@@ -29,7 +26,7 @@ class FakeLLM:
         *,
         system: str,
         documents: dict[str, str],
-        request: str,
+        instruction: str,
         output_model: type[T],
         effort: Effort = "default",
     ) -> T:
@@ -38,7 +35,7 @@ class FakeLLM:
             {
                 "system": system,
                 "documents": documents,
-                "request": request,
+                "instruction": instruction,
                 "output_model": output_model,
                 "effort": effort,
             }

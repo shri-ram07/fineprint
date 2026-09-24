@@ -108,14 +108,13 @@ def rate_limit_key(address: str) -> str:
     return str(ip)
 
 
-def _limit(
-    proxy_hops: int, per_client: RateLimiter, total: RateLimiter | None = None
-) -> Callable[[Request], None]:
-    """A route dependency that answers 429 once a client, or everyone together, hits a limit."""
+def _limit(proxy_hops: int, per_client: RateLimiter) -> Callable[[Request], Awaitable[None]]:
+    """A route dependency that answers 429 once a client has used up its hourly allowance."""
 
-    def check(request: Request) -> None:
-        within = per_client.allow(rate_limit_key(client_address(request, proxy_hops)))
-        if not within or (total is not None and not total.allow("*")):
+    # Async so it runs on the event loop: no thread hop, and the limiter is never shared
+    # between threads.
+    async def check(request: Request) -> None:
+        if not per_client.allow(rate_limit_key(client_address(request, proxy_hops))):
             logger.warning("Rate limit reached on %s", request.url.path)
             raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS)
 
@@ -126,51 +125,8 @@ def _setting(name: str, default: int) -> int:
     return int(os.environ.get(name, default))
 
 
-def create_app(llm: LLMClient | None = None) -> FastAPI:
-    """Build the app. Without an injected client, credentials are checked here, at startup."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    llm = llm or GeminiLLM.from_env()
-    allowed_hosts = os.environ.get("ALLOWED_HOSTS", DEFAULT_ALLOWED_HOSTS).split(",")
-    proxy_hops = _setting("TRUSTED_PROXY_HOPS", 0)
-    cache = ResultCache(_setting("RESULT_CACHE_SIZE", 128))
-    # Every /api/assist call spends the server's Gemini quota: the per-client limit keeps one
-    # visitor from using it all, and the total limit is a hard cap on spend. Uploads cost only
-    # CPU, so they get a per-client limit alone.
-    limit_assist = _limit(
-        proxy_hops,
-        RateLimiter(_setting("ASSIST_LIMIT_PER_CLIENT", 20)),
-        RateLimiter(_setting("ASSIST_LIMIT_TOTAL", 200)),
-    )
-    limit_upload = _limit(proxy_hops, RateLimiter(_setting("UPLOAD_LIMIT_PER_CLIENT", 60)))
-    parsing = asyncio.Semaphore(MAX_CONCURRENT_PARSES)
-
-    # The interactive API docs load scripts from a CDN, which the CSP forbids; the README
-    # documents the API endpoints instead.
-    app = FastAPI(title="FinePrint", docs_url=None, redoc_url=None, openapi_url=None)
-
-    # Middleware added later wraps middleware added earlier. The body limit rejects oversized
-    # bodies (by header and by bytes received) before a route reads them; it must sit inside
-    # the headers middleware, whose task group would otherwise swallow its 413.
-    app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_BODY_BYTES)
-
-    @app.middleware("http")
-    async def guard_and_harden(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        # Browsers send Origin on cross-site POSTs. The upload endpoint takes a raw body, which
-        # a foreign page could post without a CORS preflight, so cross-site POSTs are refused.
-        origin = request.headers.get("origin")
-        if request.method == "POST" and origin and urlsplit(origin).netloc != request.url.netloc:
-            response = JSONResponse({"detail": "Cross-site requests are not allowed."}, 403)
-        else:
-            response = await call_next(request)
-        response.headers.update(SECURITY_HEADERS)
-        if request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = STATIC_CACHE_CONTROL
-        return response
-
-    app.add_middleware(GZipMiddleware, minimum_size=1000)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+def _add_error_handlers(app: FastAPI) -> None:
+    """Map every expected failure to the one `{"detail": ...}` shape the frontend reads."""
 
     @app.exception_handler(DocumentError)
     async def document_error(_: Request, exc: DocumentError) -> JSONResponse:
@@ -194,8 +150,54 @@ def create_app(llm: LLMClient | None = None) -> FastAPI:
         )
         return JSONResponse({"detail": detail}, status_code=422)
 
+
+def create_app(llm: LLMClient | None = None) -> FastAPI:
+    """Build the app. Without an injected client, credentials are checked here, at startup."""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    llm = llm or GeminiLLM.from_env()
+    allowed_hosts = os.environ.get("ALLOWED_HOSTS", DEFAULT_ALLOWED_HOSTS).split(",")
+    proxy_hops = _setting("TRUSTED_PROXY_HOPS", 0)
+    cache = ResultCache(_setting("RESULT_CACHE_SIZE", 128))
+    # Every model call spends the server's Gemini quota: the per-client limit keeps one visitor
+    # from using it all, and the total cap bounds spend (answers from the cache are free, so
+    # they don't count against it). Uploads cost only CPU, so they get a per-client limit alone.
+    limit_assist = _limit(proxy_hops, RateLimiter(_setting("ASSIST_LIMIT_PER_CLIENT", 20)))
+    model_calls = RateLimiter(_setting("ASSIST_LIMIT_TOTAL", 200))
+    limit_upload = _limit(proxy_hops, RateLimiter(_setting("UPLOAD_LIMIT_PER_CLIENT", 60)))
+    parsing = asyncio.Semaphore(MAX_CONCURRENT_PARSES)
+
+    # The interactive API docs load scripts from a CDN, which the CSP forbids; the README
+    # documents the API endpoints instead.
+    app = FastAPI(title="FinePrint", docs_url=None, redoc_url=None, openapi_url=None)
+
+    # Middleware added later wraps middleware added earlier. The body limit rejects oversized
+    # bodies (by header and by bytes received) before a route reads them; it must sit inside
+    # the headers middleware, whose task group would otherwise swallow its 413.
+    app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_BODY_BYTES)
+
+    @app.middleware("http")
+    async def guard_and_harden(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        # Browsers send Origin on cross-site POSTs. The upload endpoint takes a raw body, which
+        # a foreign page could post without a CORS preflight, so cross-site POSTs are refused.
+        origin = request.headers.get("origin")
+        response: Response
+        if request.method == "POST" and origin and urlsplit(origin).netloc != request.url.netloc:
+            response = JSONResponse({"detail": "Cross-site requests are not allowed."}, 403)
+        else:
+            response = await call_next(request)
+        response.headers.update(SECURITY_HEADERS)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = STATIC_CACHE_CONTROL
+        return response
+
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+    _add_error_handlers(app)
+
     @app.get("/", include_in_schema=False)
-    def index() -> FileResponse:
+    async def index() -> FileResponse:
         # Always revalidate the page itself so a new deployment is picked up immediately.
         return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
@@ -204,20 +206,24 @@ def create_app(llm: LLMClient | None = None) -> FastAPI:
     @app.post("/api/documents/text", dependencies=[Depends(limit_upload)])
     async def document_text(request: Request, kind: DocumentKind) -> dict[str, str]:
         """Extract text from a file sent as the raw request body (`?kind=pdf|docx|txt|md`)."""
-        data = await request.body()
+        # Reading the body inside the limit also bounds how many uploads sit in memory at once.
         async with parsing:
+            data = await request.body()
             text = await run_in_threadpool(extract_text, kind, data)
         logger.info("Extracted %d characters from a %s upload", len(text), kind)
         return {"text": text}
 
     @app.post("/api/assist", dependencies=[Depends(limit_assist)])
-    async def run_assistant(request: AssistRequest) -> AssistResponse:
+    async def run_assistant(body: AssistRequest) -> AssistResponse:
+        if cache.get(ResultCache.key(body)) is None and not model_calls.allow("*"):
+            logger.warning("Total model-call cap reached")
+            raise HTTPException(status_code=429, detail=TOO_MANY_REQUESTS)
         started = time.perf_counter()
-        response = await assist(request, llm, cache)
+        response = await assist(body, llm, cache)
         logger.info(
             "task=%s documents=%s warnings=%d duration=%.1fs",
             response.task,
-            [len(document) for document in request.documents],
+            [len(document) for document in body.documents],
             len(response.warnings),
             time.perf_counter() - started,
         )

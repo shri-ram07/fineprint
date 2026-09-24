@@ -11,9 +11,10 @@ import logging
 import re
 import zipfile
 from typing import Literal
-from xml.etree.ElementTree import Element
+from xml.sax.handler import ContentHandler, feature_namespaces
+from xml.sax.xmlreader import AttributesNSImpl
 
-from defusedxml.ElementTree import fromstring as parse_xml
+from defusedxml.sax import make_parser
 from pypdf import PdfReader
 from pypdf.errors import FileNotDecryptedError
 
@@ -26,10 +27,13 @@ ErrorCode = Literal["empty", "no_text_layer", "encrypted", "too_large", "corrupt
 MAX_DOCUMENT_CHARS = 300_000
 # Word XML carries 5-20x markup per character of text, so this is a zip-bomb ceiling,
 # deliberately not derived from the text limit.
-MAX_XML_BYTES = 32 * 1024 * 1024
+MAX_XML_BYTES = 16 * 1024 * 1024
+# A 300,000-character document has well under 200k elements. A file packed with millions of
+# empty elements is rejected long before it costs real CPU time.
+MAX_XML_ELEMENTS = 500_000
 
-_WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+_WORD = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_MARKUP_COMPATIBILITY = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
 
 class DocumentError(Exception):
@@ -130,28 +134,62 @@ def _docx_text(data: bytes) -> str:
     if len(xml) > MAX_XML_BYTES:
         raise DocumentError("too_large", "This Word document is too large to process.")
 
-    parts: list[str] = []
-    # defusedxml refuses DTDs and entity expansion, the classic XML attacks on uploads.
-    _collect_docx_text(parse_xml(xml), parts)
-    return "".join(parts)
+    # Stream the XML instead of building a tree, so memory stays flat however many elements
+    # a hostile file packs in. defusedxml refuses entity expansion and external entities.
+    reader = _DocxText()
+    parser = make_parser()
+    parser.setFeature(feature_namespaces, True)
+    parser.setContentHandler(reader)
+    parser.parse(io.BytesIO(xml))
+    return "".join(reader.parts)
 
 
-def _collect_docx_text(node: Element, parts: list[str]) -> None:
-    """Walk the document once, in order. Paragraphs nested in text boxes are visited once,
-    and Word's legacy copy of each text box (mc:Fallback) is skipped so nothing repeats."""
-    for child in node:
-        if child.tag == _FALLBACK:
-            continue
-        if child.tag == f"{_WORD_NS}t":
-            parts.append(child.text or "")
-        elif child.tag == f"{_WORD_NS}tab":
-            parts.append("\t")
-        elif child.tag == f"{_WORD_NS}noBreakHyphen":
-            parts.append("-")
-        elif child.tag in (f"{_WORD_NS}br", f"{_WORD_NS}cr"):
-            parts.append("\n")
-        elif child.tag == f"{_WORD_NS}p" and parts and not parts[-1].endswith("\n"):
-            parts.append("\n")  # a text box starts mid-paragraph: give it its own line
-        _collect_docx_text(child, parts)
-        if child.tag == f"{_WORD_NS}p":
-            parts.append("\n")
+class _DocxText(ContentHandler):
+    """Collects the text of word/document.xml in document order.
+
+    Paragraphs nested in text boxes are read once, on their own line, and Word's legacy copy
+    of each text box (mc:Fallback) is skipped so nothing repeats.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+        self._elements = 0
+        self._fallback_depth = 0
+        self._in_text = False
+
+    def startElementNS(
+        self, name: tuple[str | None, str], qname: str | None, attrs: AttributesNSImpl
+    ) -> None:
+        self._elements += 1
+        if self._elements > MAX_XML_ELEMENTS:
+            raise DocumentError("too_large", "This Word document is too large to process.")
+        namespace, tag = name
+        if namespace == _MARKUP_COMPATIBILITY and tag == "Fallback":
+            self._fallback_depth += 1
+        if self._fallback_depth or namespace != _WORD:
+            return
+        if tag == "t":
+            self._in_text = True
+        elif tag == "tab":
+            self.parts.append("\t")
+        elif tag == "noBreakHyphen":
+            self.parts.append("-")
+        elif tag in ("br", "cr"):
+            self.parts.append("\n")
+        elif tag == "p" and self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append("\n")  # a text box starts mid-paragraph: give it its own line
+
+    def endElementNS(self, name: tuple[str | None, str], qname: str | None) -> None:
+        namespace, tag = name
+        if namespace == _MARKUP_COMPATIBILITY and tag == "Fallback":
+            self._fallback_depth -= 1
+        elif not self._fallback_depth and namespace == _WORD:
+            if tag == "t":
+                self._in_text = False
+            elif tag == "p":
+                self.parts.append("\n")
+
+    def characters(self, content: str) -> None:
+        if self._in_text and not self._fallback_depth:
+            self.parts.append(content)

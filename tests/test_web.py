@@ -5,13 +5,17 @@ from fastapi.testclient import TestClient
 
 from fineprint import web
 from fineprint.documents import MAX_DOCUMENT_CHARS
-from fineprint.llm import LLMError
+from fineprint.llm import LLMClient, LLMError
 from fineprint.web import SECURITY_HEADERS, RateLimiter, rate_limit_key
+
+
+def make_client(llm: LLMClient, host: str = "localhost") -> TestClient:
+    return TestClient(web.create_app(llm), base_url=f"http://{host}")
 
 
 @pytest.fixture
 def client(llm) -> TestClient:
-    return TestClient(web.create_app(llm), base_url="http://localhost")
+    return make_client(llm)
 
 
 def test_index_is_served_with_security_headers(client):
@@ -47,7 +51,7 @@ def test_unreadable_file_is_a_client_error(client):
 
 def test_oversized_body_is_rejected_before_parsing(monkeypatch, llm):
     monkeypatch.setattr(web, "MAX_BODY_BYTES", 64)
-    client = TestClient(web.create_app(llm), base_url="http://localhost")
+    client = make_client(llm)
     response = client.post("/api/documents/text?kind=txt", content=b"x" * 65)
     assert response.status_code == 413
 
@@ -89,14 +93,14 @@ def test_model_failures_return_fixed_messages(client, llm, lease, code, status):
 
 def test_deployment_hostname_can_be_allowed(monkeypatch, llm):
     monkeypatch.setenv("ALLOWED_HOSTS", "fineprint.example")
-    client = TestClient(web.create_app(llm), base_url="http://fineprint.example")
+    client = make_client(llm, host="fineprint.example")
     assert client.get("/").status_code == 200
     assert client.get("/", headers={"Host": "localhost"}).status_code == 400
 
 
 def test_assist_is_rate_limited(monkeypatch, llm, lease):
     monkeypatch.setenv("ASSIST_LIMIT_PER_CLIENT", "1")
-    client = TestClient(web.create_app(llm), base_url="http://localhost")
+    client = make_client(llm)
     assert client.post("/api/assist", json={"documents": [lease]}).status_code == 200
     limited = client.post("/api/assist", json={"documents": [lease]})
     assert limited.status_code == 429
@@ -122,7 +126,7 @@ def test_static_assets_are_cached_and_compressed(client):
 def test_spoofed_forwarding_headers_cannot_reset_the_limit(monkeypatch, llm, lease):
     monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
     monkeypatch.setenv("ASSIST_LIMIT_PER_CLIENT", "1")
-    client = TestClient(web.create_app(llm), base_url="http://localhost")
+    client = make_client(llm)
 
     def post(forged: str):
         # The proxy appends the real address (203.0.113.7); the client controls the rest.
@@ -135,7 +139,7 @@ def test_spoofed_forwarding_headers_cannot_reset_the_limit(monkeypatch, llm, lea
 
 def test_uploads_are_rate_limited(monkeypatch, llm):
     monkeypatch.setenv("UPLOAD_LIMIT_PER_CLIENT", "1")
-    client = TestClient(web.create_app(llm), base_url="http://localhost")
+    client = make_client(llm)
     assert client.post("/api/documents/text?kind=txt", content=b"Rent").status_code == 200
     assert client.post("/api/documents/text?kind=txt", content=b"Rent").status_code == 429
 
@@ -158,23 +162,26 @@ def test_identical_requests_are_answered_from_the_cache(client, llm, lease):
     assert len(llm.calls) == 1
 
 
-def test_total_cap_applies_across_clients(monkeypatch, llm, lease):
+def test_total_cap_counts_model_calls_across_clients(monkeypatch, llm, lease):
     monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
     monkeypatch.setenv("ASSIST_LIMIT_TOTAL", "1")
-    client = TestClient(web.create_app(llm), base_url="http://localhost")
+    client = make_client(llm)
 
-    def post(address: str):
+    def post(address: str, context: str = ""):
         headers = {"X-Forwarded-For": address}
-        return client.post("/api/assist", json={"documents": [lease]}, headers=headers)
+        body = {"documents": [lease], "context": context}
+        return client.post("/api/assist", json=body, headers=headers)
 
     assert post("203.0.113.7").status_code == 200
-    assert post("198.51.100.9").status_code == 429
+    assert post("198.51.100.9").status_code == 200  # answered from the cache: no model call
+    assert post("198.51.100.9", context="I'm the landlord").status_code == 429
+    assert len(llm.calls) == 1
 
 
 def test_missing_forwarding_header_falls_back_to_the_socket_address(monkeypatch, llm):
     monkeypatch.setenv("TRUSTED_PROXY_HOPS", "1")
     monkeypatch.setenv("UPLOAD_LIMIT_PER_CLIENT", "1")
-    client = TestClient(web.create_app(llm), base_url="http://localhost")
+    client = make_client(llm)
     assert client.post("/api/documents/text?kind=txt", content=b"Rent").status_code == 200
     assert client.post("/api/documents/text?kind=txt", content=b"Rent").status_code == 429
 
@@ -197,6 +204,7 @@ def test_rate_limiter_forgets_the_least_recently_seen_client(monkeypatch):
     limiter = RateLimiter(limit=1)
     assert limiter.allow("a", now=0)
     assert limiter.allow("b", now=1)
-    assert limiter.allow("c", now=2)  # "a" is evicted to stay within MAX_KEYS
-    assert limiter.allow("a", now=3)  # so it starts afresh
-    assert not limiter.allow("c", now=4)
+    assert not limiter.allow("a", now=2)  # "a" is seen again, so "b" is now the oldest
+    assert limiter.allow("c", now=3)  # evicts "b", not "a"
+    assert not limiter.allow("a", now=4)  # "a" kept its history
+    assert limiter.allow("b", now=5)  # "b" starts afresh

@@ -186,3 +186,9 @@ def test_docx_with_entity_expansion_is_rejected():
         f"<w:document {W}><w:body><w:p><w:r><w:t>&b;</w:t></w:r></w:p></w:body></w:document>"
     )
     assert error_code("docx", make_docx(bomb)) == "corrupt"
+
+
+def test_docx_with_too_many_elements_is_too_large(monkeypatch):
+    monkeypatch.setattr(documents, "MAX_XML_ELEMENTS", 50)
+    many = make_docx(f"<w:document {W}><w:body>" + "<w:p/>" * 100 + "</w:body></w:document>")
+    assert error_code("docx", many) == "too_large"

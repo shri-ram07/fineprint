@@ -10,8 +10,8 @@ rather than in a public issue. You can expect an acknowledgement within a few da
 
 | Threat | Controls |
 |---|---|
-| Malicious uploads (zip bombs, XML entity attacks, huge or malformed PDFs) | 10 MB body limit enforced before parsing; bounded DOCX decompression; `defusedxml`; per-page character limit for PDFs; at most two files parsed at once; any parser failure becomes a fixed 400 |
-| Prompt injection inside a document | Documents are tagged and cannot close their own tag, in any casing; the system prompt treats them as material, not instructions; output must match a fixed schema; every quote is verified against the source in code |
+| Malicious uploads (zip bombs, XML entity attacks, huge or malformed PDFs) | 10 MB body limit enforced before parsing; bounded DOCX decompression; streamed `defusedxml` SAX parsing with an element budget; per-page character limit for PDFs; at most two files parsed at once; any parser failure becomes a fixed 400 |
+| Prompt injection inside a document | Documents are tagged, and document tags inside the text (opening or closing, any casing) are neutralised; the system prompt treats them as material, not instructions; output must match a fixed schema; every quote is verified against the source in code |
 | Untrusted model output | Finish reason checked before parsing; schema validation; rendered with `textContent` only, never as HTML; strict CSP |
 | Abuse of the public demo's Gemini quota | Per-client and total hourly rate limits; client address taken from the proxy-appended end of `X-Forwarded-For` so it cannot be forged, with IPv6 clients grouped by /64 network; single instance; 120 s timeout on model calls |
 | Cross-site use of the API | Cross-origin POSTs refused (`Origin` check); `Host` allow-list against DNS rebinding; `frame-ancestors 'none'` |
