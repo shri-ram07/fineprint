@@ -5,10 +5,14 @@ task to run, whether each quote really appears in the document, how findings are
 and which warnings the user sees. The model is only asked for language understanding.
 """
 
+import asyncio
 import hashlib
 import json
 import unicodedata
+from array import array
 from collections import OrderedDict
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import NamedTuple
 
@@ -24,6 +28,7 @@ from .schemas import (
     Comparison,
     Difference,
     Quote,
+    Result,
     Risk,
     Task,
 )
@@ -33,7 +38,7 @@ DISCLAIMER = (
     "local law, your negotiating position, or anything outside the document, and it can be wrong."
 )
 
-_OUTPUT_MODELS: dict[Task, type[BaseModel]] = {
+_OUTPUT_MODELS: dict[Task, type[Result]] = {
     "analyze": Analysis,
     "ask": Answer,
     "compare": Comparison,
@@ -59,13 +64,16 @@ class ResultCache:
     """A bounded, least-recently-used store of finished responses.
 
     Identical requests (a re-submit, a refresh, the same sample tried twice) are answered
-    without another model call. It lives in memory for the life of the process only and
-    stores nothing on disk. A size of 0 disables it.
+    without another model call, including requests that arrive while the first one is still
+    running. It lives in memory for the life of the process only and stores nothing on disk.
+    A size of 0 stores nothing.
     """
 
     def __init__(self, size: int = 128) -> None:
         self.size = size
         self._items: OrderedDict[str, AssistResponse] = OrderedDict()
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._waiting: dict[str, int] = {}
 
     @staticmethod
     def key(request: AssistRequest) -> str:
@@ -74,10 +82,11 @@ class ResultCache:
         return hashlib.sha256(payload.encode()).hexdigest()
 
     def get(self, key: str) -> AssistResponse | None:
+        """The stored response, shared rather than copied: nothing modifies it after `put`."""
         if key not in self._items:
             return None
         self._items.move_to_end(key)
-        return self._items[key].model_copy(deep=True)
+        return self._items[key]
 
     def put(self, key: str, response: AssistResponse) -> None:
         if self.size <= 0:
@@ -87,20 +96,37 @@ class ResultCache:
         if len(self._items) > self.size:
             self._items.popitem(last=False)
 
+    @asynccontextmanager
+    async def exclusive(self, key: str) -> AsyncIterator[None]:
+        """Serialise work on one key, so a duplicate waits for the first result."""
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        self._waiting[key] = self._waiting.get(key, 0) + 1
+        try:
+            async with lock:
+                yield
+        finally:
+            self._waiting[key] -= 1
+            if not self._waiting[key]:  # last one out removes the lock
+                del self._waiting[key], self._locks[key]
 
-async def assist(
-    request: AssistRequest, llm: LLMClient, cache: ResultCache | None = None
-) -> AssistResponse:
+
+async def assist(request: AssistRequest, llm: LLMClient, cache: ResultCache) -> AssistResponse:
     """Run the resolved task and return a result whose quotes are verified against the source.
 
     Raises:
         LLMError: the model call failed; the error carries a user-facing message. Failures
             are never cached.
     """
-    key = ResultCache.key(request) if cache else ""
-    if cache and (cached := cache.get(key)):
-        return cached
+    key = ResultCache.key(request)
+    async with cache.exclusive(key):
+        if (cached := cache.get(key)) is not None:
+            return cached
+        response = await _run(request, llm)
+        cache.put(key, response)
+        return response
 
+
+async def _run(request: AssistRequest, llm: LLMClient) -> AssistResponse:
     task = resolve_task(request)
     documents = dict(zip(_LABELS, request.documents, strict=False))
     result = await llm.complete(
@@ -110,30 +136,28 @@ async def assist(
         output_model=_OUTPUT_MODELS[task],
         effort=_EFFORT[task],
     )
-    unmatched = verify_quotes(result, documents)
+    # Matching is CPU work on up to 300k characters per document: keep it off the event loop.
+    unmatched = await asyncio.to_thread(verify_quotes, result, documents)
     if isinstance(result, Analysis):
         result.risks.sort(key=lambda risk: _SEVERITY_ORDER[risk.severity])
     elif isinstance(result, Comparison):
         result.differences.sort(key=lambda difference: _SEVERITY_ORDER[difference.severity])
-    response = AssistResponse(
+    return AssistResponse(
         task=task,
         result=result,
         warnings=_warnings(result, unmatched),
         disclaimer=DISCLAIMER,
     )
-    if cache:
-        cache.put(key, response)
-    return response
 
 
-def _warnings(result: BaseModel, unmatched: int) -> list[str]:
+def _warnings(result: Result, unmatched: int) -> list[str]:
     warnings = []
     if unmatched:
         warnings.append(
             f"Some points ({unmatched}) could not be matched to a passage in your document. "
             "They are marked below; treat them with caution."
         )
-    if isinstance(result, Analysis) and not result.is_legal_document:
+    if isinstance(result, (Analysis, Comparison)) and not result.is_legal_document:
         warnings.append(
             "This doesn't look like a legal document, so the results may not mean much."
         )
@@ -149,7 +173,7 @@ def _warnings(result: BaseModel, unmatched: int) -> list[str]:
 class _Source(NamedTuple):
     text: str
     fingerprint: str
-    positions: list[int]
+    positions: Sequence[int]
 
 
 @lru_cache(maxsize=4096)
@@ -163,7 +187,7 @@ def _fold(char: str) -> str:
     )
 
 
-def _fingerprint(text: str) -> tuple[str, list[int]]:
+def _fingerprint(text: str) -> tuple[str, Sequence[int]]:
     """Reduce text to the characters that matter for matching, remembering where each came from.
 
     NFKD plus casefold folds ligatures, accents, full-width forms and case. Keeping only
@@ -171,7 +195,7 @@ def _fingerprint(text: str) -> tuple[str, list[int]]:
     styles, which is exactly where extracted PDF text and the model's copy tend to differ.
     """
     kept: list[str] = []
-    positions: list[int] = []
+    positions = array("I")  # 4 bytes per entry instead of a Python int object
     for index, char in enumerate(text):
         folded = _fold(char)
         if not folded:  # whitespace and punctuation: most non-letters
@@ -182,6 +206,12 @@ def _fingerprint(text: str) -> tuple[str, list[int]]:
         else:  # a ligature such as "ﬁ" folds to several characters
             positions.extend([index] * len(folded))
     return "".join(kept), positions
+
+
+@lru_cache(maxsize=8)
+def _source(text: str) -> _Source:
+    """The fingerprinted document, reused across follow-up questions about the same text."""
+    return _Source(text, *_fingerprint(text))
 
 
 def verify_quotes(result: BaseModel, documents: dict[str, str]) -> int:
@@ -195,7 +225,7 @@ def verify_quotes(result: BaseModel, documents: dict[str, str]) -> int:
     Returns:
         The number of unmatched quotes and evidence-free findings.
     """
-    sources = {label: _Source(text, *_fingerprint(text)) for label, text in documents.items()}
+    sources = {label: _source(text) for label, text in documents.items()}
     return _count_unmatched(result, sources)
 
 

@@ -6,10 +6,12 @@ message is safe to show to the user. API details go to the log, never to the use
 
 import logging
 import os
+import re
 import time
 from typing import Literal, Protocol, TypeVar
 
 from google.adk.agents import LlmAgent
+from google.adk.events import Event
 from google.adk.models import Gemini
 from google.adk.runners import InMemoryRunner
 from google.genai import Client, errors, types
@@ -47,6 +49,8 @@ NO_CREDENTIALS = (
 
 _APP = "fineprint"
 _USER = "local"
+# Any casing or spacing of a closing document tag inside the document text itself.
+_CLOSING_TAG = re.compile(r"<(\s*)/(\s*)document", re.IGNORECASE)
 
 
 class LLMError(Exception):
@@ -88,7 +92,7 @@ def _code_for_error(exc: errors.APIError) -> LLMErrorCode:
 def _wrap_document(label: str, text: str) -> str:
     # A document must not be able to close its own tag and add text that reads as ours.
     # Quote matching ignores the extra backslash, so verification is unaffected.
-    safe = text.replace("</document", "<\\/document")
+    safe = _CLOSING_TAG.sub(r"<\1\\/\2document", text)
     return f'<document id="{label}">\n{safe}\n</document>'
 
 
@@ -105,21 +109,21 @@ class GeminiLLM:
             )
         except ValueError:
             raise LLMError("configuration", NO_CREDENTIALS) from None
-        self.model = Gemini(model=model, client=client)
-        self._runners: dict[tuple[type[BaseModel], Effort], InMemoryRunner] = {}
+        self.model_name = model
+        self._gemini = Gemini(model=model, client=client)
+        self._runners: dict[tuple[str, type[BaseModel], Effort], InMemoryRunner] = {}
 
     @classmethod
     def from_env(cls) -> "GeminiLLM":
         return cls(os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL)
 
     def _runner(self, system: str, output_model: type[BaseModel], effort: Effort) -> InMemoryRunner:
-        """One agent and runner per (schema, effort), built on first use and then reused.
+        """One agent and runner per (prompt, schema, effort), built on first use and reused.
 
         Without `output_key`, ADK returns the raw text instead of validating it, which lets us
-        check why generation stopped before parsing. The system prompt is fixed for the
-        process, so it is safe to bake into the cached agent.
+        check why generation stopped before parsing.
         """
-        key = (output_model, effort)
+        key = (system, output_model, effort)
         if key not in self._runners:
             thinking = (
                 types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
@@ -128,7 +132,7 @@ class GeminiLLM:
             )
             agent = LlmAgent(
                 name=_APP,
-                model=self.model,
+                model=self._gemini,
                 static_instruction=system,  # sent verbatim, unlike `instruction`'s {templating}
                 output_schema=output_model,
                 generate_content_config=types.GenerateContentConfig(
@@ -150,15 +154,19 @@ class GeminiLLM:
         output_model: type[T],
         effort: Effort = "default",
     ) -> T:
-        runner = self._runner(system, output_model, effort)
-        sessions = runner.session_service
-        session = await sessions.create_session(app_name=_APP, user_id=_USER)
         # Documents go first so repeated questions about the same document share a prefix,
         # which Gemini caches implicitly.
         parts = [types.Part(text=_wrap_document(label, text)) for label, text in documents.items()]
         parts.append(types.Part(text=request))
-
         started = time.perf_counter()
+        final = await self._run(self._runner(system, output_model, effort), parts)
+        self._log_usage(final, effort, time.perf_counter() - started)
+        return _parse(final, output_model)
+
+    async def _run(self, runner: InMemoryRunner, parts: list[types.Part]) -> Event:
+        """Run one single-turn session and return its final event."""
+        sessions = runner.session_service
+        session = await sessions.create_session(app_name=_APP, user_id=_USER)
         final = None
         try:
             async for event in runner.run_async(
@@ -177,15 +185,17 @@ class GeminiLLM:
         finally:
             # Each request is one turn; dropping the session keeps memory flat.
             await sessions.delete_session(app_name=_APP, user_id=_USER, session_id=session.id)
-
         if final is None:
             logger.error("Gemini returned no final response")
             raise LLMError("malformed")
+        return final
+
+    def _log_usage(self, final: Event, effort: Effort, seconds: float) -> None:
         usage = final.usage_metadata
         logger.info(
             "model=%s effort=%s finish=%s error=%s input_tokens=%s output_tokens=%s "
             "thinking_tokens=%s cached_tokens=%s duration=%.1fs",
-            self.model.model,
+            self.model_name,
             effort,
             final.finish_reason,
             final.error_code,
@@ -193,25 +203,26 @@ class GeminiLLM:
             usage and usage.candidates_token_count,
             usage and usage.thoughts_token_count,
             (usage and usage.cached_content_token_count) or 0,
-            time.perf_counter() - started,
+            seconds,
         )
 
-        # Check why generation stopped before trusting the text: a truncated response can
-        # still be valid JSON that silently omits most of the analysis.
-        if final.finish_reason == types.FinishReason.MAX_TOKENS:
-            raise LLMError("truncated")
-        # A blocked prompt sets error_code; a response stopped by a safety filter can still carry
-        # partial text, so anything but a normal stop is refused rather than parsed.
-        if final.error_code or final.finish_reason not in (None, types.FinishReason.STOP):
-            raise LLMError("declined")
 
-        parts = final.content.parts if final.content and final.content.parts else []
-        text = "".join(part.text for part in parts if part.text and not part.thought)
-        try:
-            return output_model.model_validate_json(text)
-        except ValidationError as exc:
-            # Log only the failing field paths: pydantic's message embeds the input values,
-            # which here are passages of the user's document.
-            locations = [error["loc"] for error in exc.errors()]
-            logger.error("Model output did not match %s at %s", output_model.__name__, locations)
-            raise LLMError("malformed") from None
+def _parse(final: Event, output_model: type[T]) -> T:
+    """Validate the final text, but only after checking why generation stopped."""
+    # A truncated response can still be valid JSON that silently omits most of the analysis.
+    if final.finish_reason == types.FinishReason.MAX_TOKENS:
+        raise LLMError("truncated")
+    # A blocked prompt sets error_code; a response stopped by a safety filter can still carry
+    # partial text, so anything but a normal stop is refused rather than parsed.
+    if final.error_code or final.finish_reason not in (None, types.FinishReason.STOP):
+        raise LLMError("declined")
+    parts = final.content.parts if final.content and final.content.parts else []
+    text = "".join(part.text for part in parts if part.text and not part.thought)
+    try:
+        return output_model.model_validate_json(text)
+    except ValidationError as exc:
+        # Log only the failing field paths: pydantic's message embeds the input values,
+        # which here are passages of the user's document.
+        locations = [error["loc"] for error in exc.errors()]
+        logger.error("Model output did not match %s at %s", output_model.__name__, locations)
+        raise LLMError("malformed") from None

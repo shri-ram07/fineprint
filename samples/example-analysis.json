@@ -4,7 +4,7 @@
     "perspective": "the Contractor",
     "is_legal_document": true,
     "document_type": "Freelance Services Agreement",
-    "summary": "This agreement sets out the terms for Alex Morgan to design and build a website for Northwind Digital Ltd. It lasts for twelve months with automatic renewal and heavily favors the Client through unlimited liability, strict non-compete clauses, and broad intellectual property assignment. Payment terms are lengthy at 90 days, and the Client can withhold funds if unsatisfied or change the scope without adjusting fees.",
+    "summary": "This agreement sets out the terms for Alex Morgan to provide design and build services for Northwind Digital Ltd's customer website. It lasts for twelve months and renews automatically unless notice is given. The agreement heavily favors the client by allowing unpaid scope changes, withholding of payment, global non-compete restrictions, and unlimited liability for the contractor.",
     "parties": [
       "Northwind Digital Ltd",
       "Alex Morgan"
@@ -19,14 +19,6 @@
         }
       },
       {
-        "label": "Fees",
-        "value": "Amounts set out in Schedule A",
-        "quote": {
-          "document": "A",
-          "text": "Fees\" means the amounts set out in Schedule A"
-        }
-      },
-      {
         "label": "Term",
         "value": "12 months with automatic renewal",
         "quote": {
@@ -36,7 +28,7 @@
       },
       {
         "label": "Governing law",
-        "value": "Laws of England and Wales",
+        "value": "England and Wales",
         "quote": {
           "document": "A",
           "text": "This Agreement is governed by the laws of England and Wales"
@@ -46,7 +38,8 @@
     "obligations": [
       {
         "party": "the Contractor",
-        "description": "Design and build the Client's customer website as described in the project brief.",
+        "description": "Design and build the client's customer website as described in the project brief.",
+        "when": "Ongoing",
         "quote": {
           "document": "A",
           "text": "The Contractor will design and build the Client's customer website as described in the project brief"
@@ -54,7 +47,8 @@
       },
       {
         "party": "the Contractor",
-        "description": "Submit invoices within 14 days of completing a milestone.",
+        "description": "Submit invoices within 14 days of completing a milestone, otherwise they will not be paid.",
+        "when": "Within 14 days of completing a milestone",
         "quote": {
           "document": "A",
           "text": "Invoices must be submitted within 14 days of completing a milestone; late invoices will not be paid"
@@ -62,18 +56,76 @@
       },
       {
         "party": "the Contractor",
-        "description": "Keep the Client's information confidential during the agreement and for an unlimited period afterwards.",
+        "description": "Keep the client's information confidential during the agreement and for an unlimited period afterward.",
+        "when": "During this Agreement and for an unlimited period afterwards",
         "quote": {
           "document": "A",
           "text": "The Contractor must keep the Client's information confidential during this Agreement and for an unlimited period afterwards"
+        }
+      },
+      {
+        "party": "the Client",
+        "description": "Pay the fees within 90 days of receiving a valid invoice, unless payment is withheld due to dissatisfaction.",
+        "when": "Within 90 days of receiving a valid invoice",
+        "quote": {
+          "document": "A",
+          "text": "The Client will pay the Fees within ninety (90) days of receiving a valid invoice"
         }
       }
     ],
     "risks": [
       {
-        "title": "Uncapped Liability and Indemnity",
-        "plain_language": "The Contractor is liable for all losses suffered by the Client without limit and must indemnify the Client against third-party claims relating to the Deliverables.",
-        "why_it_matters": "An unlimited liability exposes you to catastrophic financial risk if the client claims heavy losses, and indemnities can force you to pay for legal claims brought by outsiders.",
+        "title": "Unpaid Scope Changes",
+        "plain_language": "The client can change the scope of services at any time in writing, but the fees will not change unless the client agrees in writing.",
+        "why_it_matters": "You could be forced to do extra work without any additional compensation if the client refuses to agree to a fee increase.",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Client may change the scope of the Services at any time by written notice. The Fees will not change unless the Client agrees otherwise in writing"
+          }
+        ]
+      },
+      {
+        "title": "Payment Withholding",
+        "plain_language": "The client may withhold any payment if it is not satisfied with the deliverables.",
+        "why_it_matters": "The client has sole discretion over whether to pay you based on their satisfaction, which creates a high risk of delayed or missed income.",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Client may withhold any payment if it is not satisfied with the Deliverables"
+          }
+        ]
+      },
+      {
+        "title": "Assignment of Pre-existing Intellectual Property",
+        "plain_language": "All rights in the deliverables, including any pre-existing materials of yours used in them, are assigned to the client upon creation.",
+        "why_it_matters": "You permanently lose ownership of your pre-existing tools, templates, or draft materials used to create the work.",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "All rights in the Deliverables, including any pre-existing materials of the Contractor used in them, are assigned to the Client on creation"
+          }
+        ]
+      },
+      {
+        "title": "Global Non-Competition",
+        "plain_language": "For twenty-four months after the agreement ends, you cannot provide services to any business that competes with the client anywhere in the world.",
+        "why_it_matters": "This severely restricts your ability to earn a living in your field after the contract ends, and worldwide geographic scope is extremely difficult to comply with.",
+        "severity": "high",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "For twenty-four (24) months after this Agreement ends, the Contractor will not provide services to any business that competes with the Client anywhere in the world"
+          }
+        ]
+      },
+      {
+        "title": "Unlimited Liability and Indemnity",
+        "plain_language": "You are liable for all losses suffered by the client without limit, and you must indemnify the client against any third-party claims relating to the deliverables.",
+        "why_it_matters": "A single mistake or third-party claim could result in financial damages that far exceed the total fees you earn under the contract.",
         "severity": "high",
         "quotes": [
           {
@@ -87,61 +139,9 @@
         ]
       },
       {
-        "title": "Global Non-Competition Clause",
-        "plain_language": "For twenty-four months after the agreement ends, the Contractor cannot provide services to any business that competes with the Client anywhere in the world.",
-        "why_it_matters": "A worldwide ban on working with competing businesses for two years can severely restrict your ability to earn a living in your field.",
-        "severity": "high",
-        "quotes": [
-          {
-            "document": "A",
-            "text": "For twenty-four (24) months after this Agreement ends, the Contractor will not provide services to any business that competes with the Client anywhere in the world"
-          }
-        ]
-      },
-      {
-        "title": "Loss of Intellectual Property and Portfolio Rights",
-        "plain_language": "All rights in the Deliverables, including pre-existing materials you owned before the agreement, are assigned to the Client on creation. You also cannot show the work in your portfolio without written consent.",
-        "why_it_matters": "You immediately lose ownership of your pre-existing tools and draft materials, and you cannot use the finished project to market your freelance services to future clients.",
-        "severity": "high",
-        "quotes": [
-          {
-            "document": "A",
-            "text": "All rights in the Deliverables, including any pre-existing materials of the Contractor used in them, are assigned to the Client on creation"
-          },
-          {
-            "document": "A",
-            "text": "The Contractor may not show the Deliverables in a portfolio without the Client's prior written consent"
-          }
-        ]
-      },
-      {
-        "title": "One-Sided Scope and Payment Terms",
-        "plain_language": "The Client can change the project scope without increasing fees unless they agree otherwise in writing. Payment takes ninety days, can be withheld if the client is unsatisfied, and late invoices are permanently unpaid.",
-        "why_it_matters": "You may be forced to do extra work for free, wait three months to get paid, forfeit payment entirely if an invoice is late by even a day, or go unpaid if the client simply claims un-satisfaction.",
-        "severity": "high",
-        "quotes": [
-          {
-            "document": "A",
-            "text": "The Client may change the scope of the Services at any time by written notice. The Fees will not change unless the Client agrees otherwise in writing"
-          },
-          {
-            "document": "A",
-            "text": "The Client will pay the Fees within ninety (90) days of receiving a valid invoice"
-          },
-          {
-            "document": "A",
-            "text": "The Client may withhold any payment if it is not satisfied with the Deliverables"
-          },
-          {
-            "document": "A",
-            "text": "Invoices must be submitted within 14 days of completing a milestone; late invoices will not be paid"
-          }
-        ]
-      },
-      {
-        "title": "One-Sided Termination Rights and Forfeiture",
-        "plain_language": "The Client can terminate immediately at any time, while the Contractor must give 90 days' notice. Upon termination, the Client only pays for Deliverables it has accepted.",
-        "why_it_matters": "If the client terminates abruptly, you may lose months of unaccepted work without compensation, while being locked in for a long notice period if you want to leave.",
+        "title": "Asymmetric Termination Rights",
+        "plain_language": "The client can terminate the agreement at any time with immediate effect, while you must give ninety days' written notice. Upon termination, the client only pays for accepted deliverables.",
+        "why_it_matters": "You are locked into a long notice period if you want to leave, while the client can walk away instantly and refuse to pay for unaccepted work.",
         "severity": "high",
         "quotes": [
           {
@@ -155,15 +155,35 @@
         ]
       },
       {
-        "title": "Unilateral Changes and Dispute Waiver",
-        "plain_language": "The Client can update terms by posting them on a portal, with continued work counting as acceptance. Disputes go to binding arbitration in London, and you waive the right to class actions.",
-        "why_it_matters": "Rules can change without your direct consent, and you give up your right to go to court or join forces with other contractors in a class action.",
-        "severity": "medium",
+        "title": "Unilateral Changes to Terms",
+        "plain_language": "The client may update the terms by posting a new version on its portal, and your continued work constitutes acceptance.",
+        "why_it_matters": "The client can alter your contract terms secretly or disadvantageously without your direct signature or active agreement.",
+        "severity": "high",
         "quotes": [
           {
             "document": "A",
             "text": "The Client may update these terms by posting a new version on its supplier portal. Continued work by the Contractor means acceptance"
-          },
+          }
+        ]
+      },
+      {
+        "title": "Portfolio Restriction",
+        "plain_language": "You may not show the deliverables in a portfolio without the client's prior written consent.",
+        "why_it_matters": "You cannot use the work to market your freelance business or showcase your portfolio publicly without explicit permission.",
+        "severity": "medium",
+        "quotes": [
+          {
+            "document": "A",
+            "text": "The Contractor may not show the Deliverables in a portfolio without the Client's prior written consent"
+          }
+        ]
+      },
+      {
+        "title": "Binding Arbitration and Class-Action Waiver",
+        "plain_language": "Any dispute must be resolved by binding arbitration in London, and you waive any right to bring or join a class or collective action.",
+        "why_it_matters": "You give up your right to a court trial and cannot pool resources with other contractors in a class action if a systemic dispute arises.",
+        "severity": "medium",
+        "quotes": [
           {
             "document": "A",
             "text": "Any dispute will be resolved by binding arbitration in London. The Contractor waives any right to bring or join a class or collective action"
@@ -171,22 +191,22 @@
         ]
       }
     ],
+    "inconsistencies": [],
     "missing_or_unclear": [
-      "Schedule A (containing the Fees)",
-      "The project brief referred to in Section 2.1"
+      "Schedule A containing the Fee amounts is missing from the provided text.",
+      "The project brief defining the specific deliverables and scope of the website design and build is missing."
     ],
     "questions_for_lawyer": [
-      "Section 4.1: How can we carve out pre-existing intellectual property so I retain ownership of my tools and background materials?",
-      "Section 6.1: Can we narrow the non-compete clause to specific direct competitors and a local geographic region rather than worldwide?",
-      "Section 7.1: Can we negotiate a liability cap linked to the total fees earned under the contract?",
-      "Section 3.2 & 8.3: How can we protect against the client withholding payment arbitrarily or refusing to pay for unaccepted work upon termination?"
+      "Ask a lawyer about Clause 2.2: How can I protect myself against unpaid scope changes requested by the client?",
+      "Ask a lawyer about Clause 6.1: Is a worldwide, 24-month non-compete clause enforceable under English law, and how can it be narrowed?",
+      "Ask a lawyer about Clause 7.1 and 7.2: How can I introduce a liability cap and exclude indirect losses or indemnities for third-party claims out of my control?",
+      "Ask a lawyer about Clause 9.1: How can I ensure that unilateral changes to terms by the client require my explicit written consent?"
     ],
     "next_steps": [
-      "Obtain and review Schedule A and the project brief, which are missing from the agreement.",
-      "Draft a list of requested amendments regarding liability caps, IP ownership, payment terms, and the non-compete clause.",
-      "Discuss the contract with a qualified lawyer before signing next week.",
-      "Negotiate the changes with Northwind Digital Ltd in writing.",
-      "Decline to sign the agreement if the client refuses to remove high-risk clauses."
+      "Request the missing Schedule A and project brief to review the fee structure and exact scope of work.",
+      "Draft a list of requested amendments to push back on high-risk clauses such as unlimited liability, unilateral term changes, unpaid scope changes, and the global non-compete.",
+      "Talk to a lawyer to review your proposed amendments before signing.",
+      "Decide whether to negotiate the terms with the client or decline to sign if the client refuses to amend the one-sided provisions."
     ]
   },
   "warnings": [],

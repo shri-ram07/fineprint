@@ -5,8 +5,16 @@ from pydantic import ValidationError
 
 from fineprint.assistant import ResultCache, assist, resolve_task, verify_quotes
 from fineprint.documents import MAX_DOCUMENT_CHARS
-from fineprint.llm import LLMError
-from fineprint.schemas import Answer, AssistRequest, Comparison, Difference, Quote, Risk
+from fineprint.llm import LLMClient, LLMError
+from fineprint.schemas import (
+    Answer,
+    AssistRequest,
+    AssistResponse,
+    Comparison,
+    Difference,
+    Quote,
+    Risk,
+)
 
 PDF_LIKE = (
     "The Tenant shall pay £900 per month. Either party may termi-\nnate on sixty (60) "
@@ -14,16 +22,30 @@ PDF_LIKE = (
 )
 
 
-def run(request: AssistRequest, llm, cache: ResultCache | None = None) -> object:
-    return asyncio.run(assist(request, llm, cache))
+def run(request: AssistRequest, llm: LLMClient, cache: ResultCache | None = None) -> AssistResponse:
+    """Run the engine; without a cache argument nothing is cached between calls."""
+    return asyncio.run(assist(request, llm, cache or ResultCache(size=0)))
 
 
 def quote(text: str, document: str = "A") -> Quote:
     return Quote(document=document, text=text)
 
 
-def answer_with(*quotes) -> Answer:
-    return Answer(answer="...", supported_by_document="yes", quotes=list(quotes), caveats=[])
+def answer_with(*quotes: Quote) -> Answer:
+    return Answer(
+        answer="...", supported_by_document="yes", quotes=list(quotes), caveats=[], next_step=""
+    )
+
+
+def comparison(*differences: Difference, is_legal_document: bool = True) -> Comparison:
+    return Comparison(
+        perspective="the Tenant",
+        is_legal_document=is_legal_document,
+        summary="",
+        differences=list(differences),
+        questions_for_lawyer=[],
+        next_steps=[],
+    )
 
 
 @pytest.mark.parametrize(
@@ -122,22 +144,17 @@ def test_risks_without_any_quote_count_as_unmatched(analysis, lease):
 
 
 def test_differences_without_any_quote_count_as_unmatched():
-    comparison = Comparison(
-        perspective="the Freelancer",
-        summary="",
-        differences=[
-            Difference(
-                topic="Payment",
-                document_a="30 days",
-                document_b="60 days",
-                impact="",
-                severity="high",
-                quotes=[],
-            )
-        ],
-        questions_for_lawyer=[],
+    result = comparison(
+        Difference(
+            topic="Payment",
+            document_a="30 days",
+            document_b="60 days",
+            impact="",
+            severity="high",
+            quotes=[],
+        )
     )
-    assert verify_quotes(comparison, {"A": "x", "B": "y"}) == 1
+    assert verify_quotes(result, {"A": "x", "B": "y"}) == 1
 
 
 def test_analyze_sends_the_document_and_situation_and_sorts_risks(llm, lease):
@@ -166,9 +183,7 @@ def test_compare_labels_both_documents_and_sorts_differences(llm, lease):
         )
         for severity in ("low", "high")
     ]
-    llm.result = Comparison(
-        perspective="the Tenant", summary="", differences=differences, questions_for_lawyer=[]
-    )
+    llm.result = comparison(*differences)
     response = run(AssistRequest(documents=[lease, "Rent is £950."]), llm)
 
     assert llm.calls[0]["documents"] == {"A": lease, "B": "Rent is £950."}
@@ -211,7 +226,7 @@ def test_non_legal_document_is_flagged(llm, analysis, lease):
 
 @pytest.mark.parametrize(("support", "flagged"), [("yes", True), ("partly", True), ("no", False)])
 def test_answer_claiming_support_without_quotes_is_flagged(llm, lease, support, flagged):
-    llm.result = Answer(answer="...", supported_by_document=support, quotes=[], caveats=[])
+    llm.result = answer_with().model_copy(update={"supported_by_document": support})
     response = run(AssistRequest(documents=[lease], question="Can I keep a pet?"), llm)
     assert any("cites no passage" in warning for warning in response.warnings) == flagged
 
@@ -231,7 +246,7 @@ def test_llm_errors_propagate(llm, lease):
 def test_only_questions_use_low_reasoning_effort(llm, lease):
     run(AssistRequest(documents=[lease]), llm)
 
-    llm.result = Comparison(perspective="", summary="", differences=[], questions_for_lawyer=[])
+    llm.result = comparison()
     run(AssistRequest(documents=[lease, lease]), llm)
 
     llm.result = answer_with()
@@ -251,12 +266,17 @@ def test_cache_answers_identical_requests_without_the_model(llm, lease):
     assert len(llm.calls) == 2  # a different situation is a different answer
 
 
-def test_cache_returns_copies_and_evicts_the_oldest(llm, lease):
+def test_cache_stores_a_copy_and_evicts_the_oldest(analysis, lease):
     cache = ResultCache(size=1)
-    run(AssistRequest(documents=[lease]), llm, cache).result.summary = "changed by the caller"
-    assert (
-        run(AssistRequest(documents=[lease]), llm, cache).result.summary != "changed by the caller"
-    )
+    response = AssistResponse(task="analyze", result=analysis, warnings=[], disclaimer="")
+    cache.put("key", response)
+    response.result.summary = "changed after storing"
+    assert cache.get("key").result.summary != "changed after storing"
+
+
+def test_cache_evicts_the_least_recently_used(llm, lease):
+    cache = ResultCache(size=1)
+    run(AssistRequest(documents=[lease]), llm, cache)
 
     run(AssistRequest(documents=[lease], context="new"), llm, cache)  # evicts the first entry
     run(AssistRequest(documents=[lease]), llm, cache)
@@ -278,3 +298,21 @@ def test_zero_size_cache_is_disabled(llm, lease):
     run(AssistRequest(documents=[lease]), llm, cache)
     run(AssistRequest(documents=[lease]), llm, cache)
     assert len(llm.calls) == 2
+
+
+def test_simultaneous_identical_requests_share_one_model_call(llm, lease):
+    cache = ResultCache()
+    request = AssistRequest(documents=[lease])
+
+    async def both() -> tuple[AssistResponse, AssistResponse]:
+        return await asyncio.gather(assist(request, llm, cache), assist(request, llm, cache))
+
+    first, second = asyncio.run(both())
+    assert first == second
+    assert len(llm.calls) == 1
+
+
+def test_comparison_of_non_legal_text_is_flagged(llm, lease):
+    llm.result = comparison(is_legal_document=False)
+    response = run(AssistRequest(documents=[lease, "A recipe for bread."]), llm)
+    assert any("doesn't look like a legal document" in warning for warning in response.warnings)

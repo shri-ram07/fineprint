@@ -32,6 +32,7 @@ class KeyTerm(BaseModel):
 class Obligation(BaseModel):
     party: str
     description: str = Field(description="What this party must or must not do, in plain words.")
+    when: str = Field(description="The deadline or trigger, e.g. 'Within 14 days', or 'Ongoing'.")
     quote: Quote
 
 
@@ -55,6 +56,9 @@ class Analysis(BaseModel):
     key_terms: list[KeyTerm]
     obligations: list[Obligation]
     risks: list[Risk]
+    inconsistencies: list[str] = Field(
+        description="Clauses that contradict each other, naming both clauses."
+    )
     missing_or_unclear: list[str]
     questions_for_lawyer: list[str] = Field(
         description="Each names the clause and what the reader needs to find out."
@@ -69,6 +73,9 @@ class Answer(BaseModel):
     supported_by_document: Literal["yes", "partly", "no"]
     quotes: list[Quote]
     caveats: list[str] = Field(description="Conditions, exceptions or gaps that affect the answer.")
+    next_step: str = Field(
+        description="The one most useful thing to do next, or a question for a lawyer."
+    )
 
 
 class Difference(BaseModel):
@@ -82,9 +89,17 @@ class Difference(BaseModel):
 
 class Comparison(BaseModel):
     perspective: str = Field(description="The party this is written for, e.g. 'the Freelancer'.")
+    is_legal_document: bool = Field(description="Whether both texts are legal documents.")
     summary: str
     differences: list[Difference]
     questions_for_lawyer: list[str]
+    next_steps: list[str] = Field(
+        description="Concrete actions in order, e.g. which version to prefer or what to negotiate."
+    )
+
+
+# The three shapes the model can return, one per task.
+Result = Analysis | Answer | Comparison
 
 
 DocumentText = Annotated[str, Field(max_length=MAX_DOCUMENT_CHARS)]
@@ -114,6 +129,6 @@ class AssistRequest(BaseModel):
 
 class AssistResponse(BaseModel):
     task: Task
-    result: Analysis | Answer | Comparison
+    result: Result
     warnings: list[str]
     disclaimer: str

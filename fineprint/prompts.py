@@ -57,8 +57,9 @@ confidentiality; non-compete and non-solicitation; dispute resolution, arbitrati
 class-action waivers and governing law; one-sided rights to change the terms; assignment. \
 Each of these that is present belongs in `risks` or `key_terms`; each that would normally \
 appear in this kind of document but is absent belongs in `missing_or_unclear`. Clauses that \
-contradict each other are risks. A schedule, exhibit or annex that is referred to but not \
-included belongs in `missing_or_unclear`.
+contradict each other belong in `inconsistencies` (and in `risks` if they matter). A schedule, \
+exhibit or annex that is referred to but not included belongs in `missing_or_unclear`. Give \
+each obligation its deadline or trigger in `when`.
 
 {_SEVERITY}
 
@@ -72,7 +73,7 @@ Answer the user's question using only the documents provided. Set `supported_by_
 to "yes" if the documents answer it directly, "partly" if they answer only part of it or \
 refer to something that is not included, and "no" if they do not address it. Quote the \
 passages the answer relies on. Put conditions, exceptions and gaps that affect the answer \
-in `caveats`.""",
+in `caveats`, and the single most useful action or question for a lawyer in `next_step`.""",
     "compare": f"""\
 Compare Document A with Document B for the user, for example two versions of one agreement \
 or two competing offers.
@@ -84,7 +85,11 @@ List each meaningful difference by topic. When a topic appears in only one docum
 and quote the relevant passage from each document. Ignore wording changes that do not \
 change the meaning.
 
-{_SEVERITY}""",
+{_SEVERITY}
+
+In `next_steps`, give concrete actions in order: which version serves the user better and \
+what to ask for or negotiate. If either text is not a legal document, set \
+`is_legal_document` to false.""",
 }
 
 

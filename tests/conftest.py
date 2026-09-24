@@ -1,9 +1,13 @@
-from typing import Any
+import asyncio
+from typing import TypeVar
 
 import pytest
 from pydantic import BaseModel
 
+from fineprint.llm import Effort
 from fineprint.schemas import Analysis, KeyTerm, Obligation, Quote, Risk
+
+T = TypeVar("T", bound=BaseModel)
 
 LEASE = """\
 1. Rent. The Tenant shall pay £900 per month on the first day of each month.
@@ -18,7 +22,7 @@ class FakeLLM:
     def __init__(self, result: BaseModel) -> None:
         self.result = result
         self.error: Exception | None = None
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[dict[str, object]] = []
 
     async def complete(
         self,
@@ -26,9 +30,10 @@ class FakeLLM:
         system: str,
         documents: dict[str, str],
         request: str,
-        output_model: type,
-        effort: str = "default",
-    ) -> Any:
+        output_model: type[T],
+        effort: Effort = "default",
+    ) -> T:
+        await asyncio.sleep(0)  # a real model call suspends; concurrency tests rely on it
         self.calls.append(
             {
                 "system": system,
@@ -68,6 +73,7 @@ def analysis() -> Analysis:
             Obligation(
                 party="Tenant",
                 description="Pay rent on the 1st of each month.",
+                when="Monthly, on the 1st",
                 quote=_quote("on the first day of each month"),
             )
         ],
@@ -87,6 +93,7 @@ def analysis() -> Analysis:
                 quotes=[_quote("The deposit is non-refundable.")],
             ),
         ],
+        inconsistencies=[],
         missing_or_unclear=["Who pays for repairs"],
         questions_for_lawyer=["Is the non-refundable deposit in clause 2 enforceable?"],
         next_steps=["Ask the landlord to make the deposit refundable, in writing."],
