@@ -290,7 +290,7 @@ one line with its finish reason, token counts (including cached tokens) and dura
   - a restrictive Permissions-Policy
   - cross-origin opener and resource policies
 - **Spend limits that can't be dodged.** Both API endpoints are rate limited per client, and model calls also have a total hourly cap. Client addresses come from the proxy-appended end of `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`), not the client-controlled start, so forging the header does not reset a limit. Model calls have a 120-second timeout.
-- **Supply chain.** Dependencies are locked (`uv.lock`). The base image is pinned by digest and the CI actions by commit SHA. CI runs the tests, ruff's security rules (flake8-bandit) and `pip-audit` on every push, and Dependabot proposes updates weekly. DOCX XML is parsed with `defusedxml`.
+- **Supply chain.** Dependencies are locked (`uv.lock`). The base image is pinned by digest and the CI actions by commit SHA. CI runs the tests, ruff's security rules (flake8-bandit) and `pip-audit` on every push and on a weekly schedule, so newly disclosed vulnerabilities surface even without new commits. DOCX XML is parsed with `defusedxml`.
 - **Deployment.** The service runs as a dedicated least-privilege service account, reads its key from Secret Manager, serves only HTTPS, and runs as a non-root user on a single instance.
 
 See [`SECURITY.md`](SECURITY.md) for the threat model and how to report a vulnerability.

@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly, so newly published vulnerabilities in the locked dependencies are caught even
+  # when nothing is pushed (the repo keeps a single branch, so no update bots open branches).
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read

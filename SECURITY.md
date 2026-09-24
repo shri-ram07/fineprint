@@ -16,7 +16,7 @@ rather than in a public issue. You can expect an acknowledgement within a few da
 | Abuse of the public demo's Gemini quota | Per-client and total hourly rate limits; client address taken from the proxy-appended end of `X-Forwarded-For` so it cannot be forged; single instance; 120 s timeout on model calls |
 | Cross-site use of the API | Cross-origin POSTs refused (`Origin` check); `Host` allow-list against DNS rebinding; `frame-ancestors 'none'` |
 | Secret leakage | Key read from the environment (Secret Manager in production), never logged; `.env` excluded from git, uploads and images; logs hold sizes and timings, never document text |
-| Vulnerable dependencies | Locked dependencies (`uv.lock`), digest-pinned base image, SHA-pinned CI actions, `pip-audit` in CI, weekly Dependabot updates |
+| Vulnerable dependencies | Locked dependencies (`uv.lock`), digest-pinned base image, SHA-pinned CI actions, `pip-audit` on every push and weekly on a schedule |
 
 ## Known limits
 
