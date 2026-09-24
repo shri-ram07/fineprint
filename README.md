@@ -172,13 +172,15 @@ message in `static/app.js`, so change them together.
 2. Optionally write your situation, for example "I'm the freelancer, signing next week".
 3. Leave the question blank and press **Get help with this document**.
 
-Expect the analysis to flag the worldwide 24-month non-compete, the unlimited liability, the
-assignment of your pre-existing work and the one-sided termination rights. It should also
-report that Schedule A (the fees) is referenced but missing, and give questions to ask a
-lawyer and next steps.
+In a real run with `gemini-3.5-flash` (about 20 seconds), the analysis flagged ten risks,
+seven of them high: the unpaid scope changes, the right to withhold payment, the assignment
+of your pre-existing work, the worldwide 24-month non-compete, unlimited liability, one-sided
+termination and unilateral changes to the terms. It also reported that Schedule A (the fees)
+and the project brief are referenced but missing. Every quote matched the document. The full
+response is in [`samples/example-analysis.json`](samples/example-analysis.json).
 
 4. Ask a follow-up, such as "Can I leave early?". The answer is added below the analysis.
-5. Open **Compare with a second document**, add `samples/agreement-v2.txt` and submit with no question. You get a topic-by-topic comparison of the two drafts.
+5. Open **Compare with a second document**, add `samples/agreement-v2.txt` and submit with no question. You get a topic-by-topic comparison of the two drafts, with quotes from each (about 20 seconds).
 
 ## Testing
 

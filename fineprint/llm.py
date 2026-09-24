@@ -99,7 +99,9 @@ class GeminiLLM:
             static_instruction=system,  # sent verbatim, unlike `instruction`'s {templating}
             output_schema=output_model,
             generate_content_config=types.GenerateContentConfig(
-                max_output_tokens=MAX_OUTPUT_TOKENS
+                max_output_tokens=MAX_OUTPUT_TOKENS,
+                # No tools are used; this also silences the SDK's per-call AFC warning.
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             ),
         )
         runner = InMemoryRunner(agent=agent, app_name=_APP)
