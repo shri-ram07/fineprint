@@ -133,8 +133,8 @@ Also included:
 
 - Python 3.11+, [uv](https://docs.astral.sh/uv/)
 - FastAPI (Starlette, uvicorn) for the web layer
-- [Google ADK](https://google.github.io/adk-docs/) with Gemini. The model defaults to `gemini-3.5-flash`.
-- pypdf (with `cryptography` for encrypted PDFs); DOCX is parsed with the standard library
+- [Google ADK](https://google.github.io/adk-docs/) with Gemini. The model defaults to `gemini-3.5-flash-lite`.
+- pypdf (with `cryptography` for encrypted PDFs); DOCX is unzipped with the standard library and parsed with defusedxml
 - pytest and ruff
 - Plain HTML, CSS and JavaScript for the UI
 
@@ -162,10 +162,13 @@ Open <http://localhost:8000>. For development, add `--reload`.
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `GOOGLE_API_KEY` | Yes (`GEMINI_API_KEY` also works) | none | Gemini API key |
-| `GEMINI_MODEL` | No | `gemini-3.5-flash` | Model used for all tasks, e.g. a Pro model for harder documents |
+| `GEMINI_MODEL` | No | `gemini-3.5-flash-lite` | Model used for all tasks, e.g. `gemini-3.5-flash` or a Pro model for dense contracts |
 | `ALLOWED_HOSTS` | When deployed | `localhost,127.0.0.1` | Comma-separated hostnames the app answers to |
 | `ASSIST_LIMIT_PER_CLIENT` | No | `20` | Model requests allowed per client per hour |
 | `ASSIST_LIMIT_TOTAL` | No | `200` | Model requests allowed per hour across all clients |
+| `UPLOAD_LIMIT_PER_CLIENT` | No | `60` | File extractions allowed per client per hour |
+| `TRUSTED_PROXY_HOPS` | Behind a proxy | `0` | Proxies in front of the app (`1` on Cloud Run); client addresses are read from that many hops from the right of `X-Forwarded-For` |
+| `RESULT_CACHE_SIZE` | No | `128` | Finished answers kept in memory for identical repeat requests (`0` disables) |
 
 If no key is set, the app refuses to start and says what to do. Size limits are constants: the upload limit in `web.py`, the
 document limit in `documents.py`, and the question and situation limits in `schemas.py`. The UI
@@ -185,7 +188,7 @@ gcloud secrets add-iam-policy-binding fineprint-gemini-api-key --project PROJECT
 gcloud run deploy fineprint --source . --project PROJECT --region asia-south1 \
   --service-account fineprint-run@PROJECT.iam.gserviceaccount.com \
   --set-secrets GOOGLE_API_KEY=fineprint-gemini-api-key:latest \
-  --set-env-vars "^@^ALLOWED_HOSTS=<your service hostnames>" \
+  --set-env-vars "^@^ALLOWED_HOSTS=<your service hostnames>@TRUSTED_PROXY_HOPS=1" \
   --allow-unauthenticated --max-instances 1 --concurrency 20 --memory 512Mi --timeout 300
 ```
 
@@ -202,15 +205,16 @@ Choices behind these flags:
 2. Optionally write your situation, for example "I'm the freelancer, signing next week".
 3. Leave the question blank and press **Get help with this document**.
 
-In a real run with `gemini-3.5-flash` (about 20 seconds), the analysis flagged ten risks,
-seven of them high: the unpaid scope changes, the right to withhold payment, the assignment
-of your pre-existing work, the worldwide 24-month non-compete, unlimited liability, one-sided
-termination and unilateral changes to the terms. It also reported that Schedule A (the fees)
-and the project brief are referenced but missing. Every quote matched the document. The full
-response is in [`samples/example-analysis.json`](samples/example-analysis.json).
+In a real run with `gemini-3.5-flash-lite` (about 8 seconds), the analysis flagged five
+high risks: uncapped liability and indemnity, the worldwide non-compete, the loss of your
+pre-existing work and portfolio rights, one-sided scope and payment terms, and one-sided
+termination. It rated unilateral changes and the dispute waiver as medium. It also reported
+that Schedule A (the fees) and the project brief are referenced but missing. All 20 quotes
+matched the document. The full response is in
+[`samples/example-analysis.json`](samples/example-analysis.json).
 
 4. Ask a follow-up, such as "Can I leave early?". The answer is added below the analysis.
-5. Open **Compare with a second document**, add `samples/agreement-v2.txt` and submit with no question. You get a topic-by-topic comparison of the two drafts, with quotes from each (about 20 seconds).
+5. Open **Compare with a second document**, add `samples/agreement-v2.txt` and submit with no question. You get a topic-by-topic comparison of the two drafts, with quotes from each (about 8 seconds).
 
 ## Testing
 
@@ -221,16 +225,16 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-The suite runs offline in about two seconds. The model is replaced by a fake at the
+The suite runs offline in about 15 seconds. The model is replaced by a fake at the
 `LLMClient` protocol, and the SDK client by a mock inside the adapter tests. Test PDFs and
 DOCX files are built inside the tests, so there are no binary fixtures.
 
 | File | What it covers |
 |---|---|
-| `test_documents.py` | Encodings (UTF-8, BOM, UTF-16, cp1252), DOCX paragraphs and zip-bomb bound, PDF text, scanned and partly scanned PDFs, encrypted PDFs, corrupt files, size limits |
-| `test_assistant.py` | Task selection, request validation, quote verification (PDF artefacts, altered amounts, empty and wrongly labelled quotes, evidence-free findings), what is sent to the model, severity order, warnings |
-| `test_llm.py` | Runs the real ADK agent with only the network call stubbed: request shape, finish reason checked before parsing, blocked prompts, malformed output not logged, API errors to error codes, missing key |
-| `test_web.py` | Routes, upload handling, 413, host check, security headers, validation errors that never echo the document, model failures as fixed messages |
+| `test_documents.py` | Encodings (UTF-8, BOM, UTF-16, cp1252), DOCX paragraphs, zip-bomb and XML-entity attacks, PDF text, scanned and partly scanned PDFs, encrypted PDFs, corrupt files, size limits |
+| `test_assistant.py` | Task selection, request validation, quote verification (PDF artefacts, altered amounts, empty and wrongly labelled quotes, evidence-free findings), what is sent to the model, severity order, warnings, reasoning effort per task, the result cache (hits, copies, eviction, failures not cached) |
+| `test_llm.py` | Runs the real ADK agent with only the network call stubbed: request shape, finish reason checked before parsing, blocked prompts, malformed output not logged, API errors to error codes, missing key, agent reuse and session cleanup, low-effort thinking, tag break-out, timeout and retries |
+| `test_web.py` | Routes, upload handling, 413, host check, security headers, cross-site POSTs refused, rate limits (including forged `X-Forwarded-For`), gzip and cache headers, cached repeat answers, validation errors that never echo the document, model failures as fixed messages |
 
 A manual check needs a real key: run all three tasks on `samples/`. Each model call logs
 one line with its finish reason, token counts (including cached tokens) and duration.
@@ -247,9 +251,20 @@ one line with its finish reason, token counts (including cached tokens) and dura
 - **Quote verification in code, not model-reported sources.** The model is asked for verbatim quotes and code checks every one, so the evidence is verified rather than trusted. The cost is a tolerant matcher that trims edge punctuation from the passages it returns.
 - **ADK without `output_key`.** ADK can validate structured output itself, but only after the fact and without saying why generation stopped. FinePrint reads the raw text and checks the finish reason first, so a truncated or blocked response can never be shown as a complete result.
 - **ADK for a single call.** Each request is one single-turn agent run. That is more machinery than calling the Gemini SDK directly, but it keeps the model layer on the framework this project standardises on, and it is where tools or multi-step agents would plug in.
-- **One call per task, Flash by default.** `gemini-3.5-flash` is fast and inexpensive. Set `GEMINI_MODEL` to a Pro model for long or dense contracts. Documents are sent first so that repeated questions on the same document share a prefix that Gemini can cache.
+- **One call per task, Flash-Lite by default.** `gemini-3.5-flash-lite` answers in 2–8 seconds at the lowest cost, and in testing every quote still matched its document. Set `GEMINI_MODEL=gemini-3.5-flash` (or a Pro model) for more thorough analyses of long or dense contracts.
 - **No automatic retry on a blocked response.** Legal text rarely trips safety filters. When it does, the user sees a clear error rather than a silent retry.
-- **Stateless over convenient.** Nothing is stored, so there is nothing to leak or clean up. The cost is that the browser sends the document text with every request.
+- **Stateless over convenient.** Nothing is written to disk, so there is nothing to leak or clean up. The cost is that the browser sends the document text with every request. The only state is a bounded in-memory cache of recent answers, which disappears when the process stops.
+
+## Efficiency
+
+- **The model is called as little as possible.** An identical request is answered from a bounded LRU cache (`RESULT_CACHE_SIZE`) with no model call. Failures are never cached.
+- **Reasoning is sized to the task.** Questions run with Gemini's low thinking level, since they are lookups: about 2 seconds with Flash-Lite. Analyses and comparisons use the default level.
+- **No per-request setup.** One ADK agent and runner per task type is built on first use and reused. Each request only opens a session, which is deleted when the request finishes, so memory stays flat.
+- **Model calls are bounded.** There is a 120-second timeout and up to 3 automatic retries with backoff for transient failures, so a slow upstream cannot pin a worker.
+- **Linear-time quote checking.** Each document is fingerprinted once per request. The per-character Unicode folding is memoised because a document uses few distinct characters. This is about 35% faster than the unmemoised version on a 300,000-character document (0.034 s against 0.052 s).
+- **Compact transfer.** Responses over 1 KB are gzip-compressed. Static files are cached for an hour, and the page itself is revalidated so new deployments are picked up.
+- **Nothing blocks the server.** File parsing runs in a worker thread, and the model call is fully async. A running analysis never delays other requests.
+- **Bounded resources.** Bodies are capped at 10 MB before they are read, documents at 300,000 characters, DOCX XML at 32 MB, and output at 32k tokens. The service runs on a single small Cloud Run instance.
 
 ## Limitations
 
@@ -267,8 +282,18 @@ one line with its finish reason, token counts (including cached tokens) and dura
 - **Untrusted model output.** The output is schema-validated, its stop reason is checked first, its quotes are verified, and it is rendered with `textContent` only, never as HTML.
 - **Prompt injection.** The system prompt treats document text as material, not instructions, and the output schema is fixed. This reduces the risk but cannot eliminate it, which is why extracted text is shown to the user and quotes are verified.
 - **Privacy in logs and errors.** Logs hold sizes, durations, token counts and request ids, never document text, questions or file names. Validation errors are rebuilt from field names so they never echo the submitted document.
-- **Hosts and headers.** The app answers only to the hostnames in `ALLOWED_HOSTS`. That is a DNS-rebinding guard when run locally, because the server spends your API key. It also sends a strict CSP, `nosniff` and `no-referrer`.
-- **Spend limits.** `/api/assist` is the only endpoint that calls the model, and it is rate limited per client and in total. The total is the hard cap, since client addresses from proxy headers can be spoofed. The deployed service runs on a single instance, uses HTTPS, and reads its key from Secret Manager.
+- **Hosts, origins and headers.** The app answers only to the hostnames in `ALLOWED_HOSTS`, a DNS-rebinding guard for a locally running copy that spends your API key. It refuses cross-site POSTs (by `Origin`). It sends:
+  - a strict CSP (`default-src 'self'`, `base-uri 'none'`, `object-src 'none'`, `form-action 'self'`, `frame-ancestors 'none'`)
+  - HSTS
+  - `nosniff`
+  - `no-referrer`
+  - a restrictive Permissions-Policy
+  - cross-origin opener and resource policies
+- **Spend limits that can't be dodged.** Both API endpoints are rate limited per client, and model calls also have a total hourly cap. Client addresses come from the proxy-appended end of `X-Forwarded-For` (`TRUSTED_PROXY_HOPS`), not the client-controlled start, so forging the header does not reset a limit. Model calls have a 120-second timeout.
+- **Supply chain.** Dependencies are locked (`uv.lock`). The base image is pinned by digest and the CI actions by commit SHA. CI runs the tests, ruff's security rules (flake8-bandit) and `pip-audit` on every push, and Dependabot proposes updates weekly. DOCX XML is parsed with `defusedxml`.
+- **Deployment.** The service runs as a dedicated least-privilege service account, reads its key from Secret Manager, serves only HTTPS, and runs as a non-root user on a single instance.
+
+See [`SECURITY.md`](SECURITY.md) for the threat model and how to report a vulnerability.
 
 The public demo has no login, by design, so evaluators can use it. Anything beyond a demo
 would need authentication, and a shared store such as Redis for rate limits if it runs on
