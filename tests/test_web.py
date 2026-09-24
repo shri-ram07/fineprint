@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from fineprint import web
 from fineprint.documents import MAX_DOCUMENT_CHARS
 from fineprint.llm import LLMError
+from fineprint.web import RateLimiter
 
 
 @pytest.fixture
@@ -84,3 +85,28 @@ def test_model_failures_return_fixed_messages(client, llm, lease, code, status):
     response = client.post("/api/assist", json={"documents": [lease]})
     assert response.status_code == status
     assert response.json() == {"detail": LLMError(code).message}
+
+
+def test_deployment_hostname_can_be_allowed(monkeypatch, llm):
+    monkeypatch.setenv("ALLOWED_HOSTS", "fineprint.example")
+    client = TestClient(web.create_app(llm), base_url="http://fineprint.example")
+    assert client.get("/").status_code == 200
+    assert client.get("/", headers={"Host": "localhost"}).status_code == 400
+
+
+def test_assist_is_rate_limited(monkeypatch, llm, lease):
+    monkeypatch.setenv("ASSIST_LIMIT_PER_CLIENT", "1")
+    client = TestClient(web.create_app(llm), base_url="http://localhost")
+    assert client.post("/api/assist", json={"documents": [lease]}).status_code == 200
+    limited = client.post("/api/assist", json={"documents": [lease]})
+    assert limited.status_code == 429
+    assert "try again" in limited.json()["detail"]
+    assert len(llm.calls) == 1  # the model was not called for the rejected request
+
+
+def test_rate_limiter_uses_a_rolling_window():
+    limiter = RateLimiter(limit=2, window_seconds=60)
+    assert limiter.allow("a", now=0) and limiter.allow("a", now=1)
+    assert not limiter.allow("a", now=59)
+    assert limiter.allow("b", now=59)  # other clients are unaffected
+    assert limiter.allow("a", now=60.5)  # the first event has left the window

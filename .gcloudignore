@@ -1,0 +1,2 @@
+# Files never uploaded to Cloud Build (gcloud run deploy --source .).
+#!include:.dockerignore
